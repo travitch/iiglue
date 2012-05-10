@@ -1,65 +1,95 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Main ( main ) where
 
+import Control.Monad ( unless, when )
 import qualified Data.ByteString.Lazy as LBS
 import Data.Map ( Map )
 import qualified Data.Map as M
 import Data.Maybe ( mapMaybe )
 import Data.Monoid
+import Data.Set ( Set )
 import qualified Data.Set as S
+import Data.Text ( Text )
+import qualified Data.Text as T
 import System.Environment ( getArgs )
-import System.IO ( stdout )
-import Text.XML.Generator
+import Text.Printf
+import Text.XML as XML
+import Text.XML.Cursor as XML
 
 import Foreign.Inference.Interface
 
+import Debug.Trace
+debug = flip trace
+
+data FunctionIndex =
+  FunctionIndex {
+    functionIndexMap :: Map String ForeignFunction,
+    functionIndexRCTypes :: Set String
+    }
+
 main :: IO ()
 main = do
-  [ifaceFile] <- getArgs
+  [ifaceFile, girFile] <- getArgs
   iface <- readLibraryInterface ifaceFile
-  let (classGroups, freeFunctions) = groupByMethods iface
-      classFragments = map (uncurry classToFragment) (M.toList classGroups)
-      funcFragments = map (functionToFragment "function") freeFunctions
+  girBS <- LBS.readFile girFile
+  let girDoc = parseLBS_ def girBS
+      girCursor = fromDocument girDoc
+      freeFunctions = girCursor $// laxElement "function"
+      methods = girCursor $// laxElement "method"
+      allFuncs = freeFunctions ++ methods
+      libIndex = indexLibrary iface
 
-      x = doc defaultDocInfo $
-        xelem "repository" $
-         xelems (funcFragments ++ classFragments)
+  mapM_ (examineFunction libIndex) allFuncs
 
-  LBS.hPut stdout (xrender x)
   return ()
 
-functionToFragment :: String -> ForeignFunction -> Xml Elem
-functionToFragment funcType ff =
-  xelem funcType (funcAttrs <#> xelems [returnElem, pelems])
+indexLibrary :: LibraryInterface -> FunctionIndex
+indexLibrary iface =
+  FunctionIndex {
+    functionIndexMap = foldr addFunction mempty (libraryFunctions iface),
+    functionIndexRCTypes = S.fromList $ mapMaybe toStructName annotatedTypes
+    }
   where
-    n = foreignFunctionName ff
-    funcAttrs = xattrs [xattr "name" n, xattr "c:identifier" n]
-    returnElem = returnElemFragment ff
-    paramElems = map paramFragment (foreignFunctionParameters ff)
-    pelems = xelem "parameters" $ xelems paramElems
+    addFunction ff = M.insert (foreignFunctionName ff) ff
+    hasTypeAnnotation = not . null . snd
+    annotatedTypes = map fst $ filter hasTypeAnnotation (libraryTypes iface)
 
-paramFragment :: Parameter -> Xml Elem
-paramFragment p =
-  xelem "parameter" (attrs <#> typeElem)
+lookupFunction :: FunctionIndex -> Text -> ForeignFunction
+lookupFunction (FunctionIndex functionIndex _) name =
+  M.findWithDefault errMsg (T.unpack name) functionIndex
   where
-    attrs = xattrs [xattr "name" (parameterName p), xattr "transfer-ownership" xfer]
-    xfer = case parameterEscapes p of
-      False -> "none"
-      True -> "full"
-    typeElem = typeToElem (parameterType p)
+    errMsg = error ("Function not found " ++ show name)
 
-parameterEscapes :: Parameter -> Bool
-parameterEscapes = any (==PAEscape) . parameterAnnotations
+examineFunction :: FunctionIndex -> Cursor -> IO ()
+examineFunction functionIndex cur = do
+  let [name] = cur $| laxAttribute "identifier"
+      ff = lookupFunction functionIndex name
+      retCur = cur $/ laxElement "return-value"
+  print name
+  checkAllocator functionIndex ff retCur
 
-returnElemFragment :: ForeignFunction -> Xml Elem
-returnElemFragment ff =
-  xelem "return-value" (xattr "transfer-ownership" transferType <#> typeElem)
+isRefCountedType :: FunctionIndex -> Text -> Bool
+isRefCountedType functionIndex typeName =
+  S.member (T.unpack typeName) (functionIndexRCTypes functionIndex)
+
+checkAllocator :: FunctionIndex -> ForeignFunction -> [Cursor] -> IO ()
+checkAllocator functionIndex ff [retCur] =
+  case isAllocator ff of
+    False -> do
+      when (xfer == ["full"] && isRefCountedType functionIndex tyname) $ do
+        -- This is only a problem if the type is not reference counted
+        -- (since then the caller owns a reference)
+        printf "Expected full transfer of ownership in return value to imply %s is an allocator\n" fname
+    True ->
+      -- Default is transfer=full, so accept the empty list
+      unless (xfer == ["full"] || xfer == []) $ do
+        printf "Expected allocator %s to fully transfer ownership: %s\n" fname (show xfer)
   where
-    rt = foreignFunctionReturnType ff
-    -- Can also model containers...
-    transferType = case isAllocator ff of
-      True -> "full"
-      False -> "none"
-    typeElem = typeToElem rt
+    xfer = retCur $| laxAttribute "transfer-ownership"
+    [[tyname]] = retCur $/ laxElement "type" &| laxAttribute "type"
+    fname = foreignFunctionName ff
+checkAllocator _ ff _ =
+  error ("Multiple return values for function " ++ foreignFunctionName ff)
 
 isAllocator :: ForeignFunction -> Bool
 isAllocator ff = any isAlloc annots
@@ -68,29 +98,6 @@ isAllocator ff = any isAlloc annots
     isAlloc (FAAllocator _) = True
     isAlloc _ = False
 
--- FIXME make some real names here.  Probably need to pass in the set
--- of ref counted types to identify gobjects vs other ptrs
-typeToElem :: CType -> Xml Elem
-typeToElem t = xelem "type" (xattrs [xattr "name" "", xattr "c:type" cname])
-  where
-    cname = case t of
-      CVoid -> "void"
-      CInt n -> "gint" ++ show n
-      CUInt n -> "guint" ++ show n
-      CFloat -> "gfloat"
-      CDouble -> "gdouble"
-      _ -> "other"
-
-classToFragment :: String -> [ForeignFunction] -> Xml Elem
-classToFragment typeName methods =
-  xelem "class" (attrs <#> members)
-  where
-    attrs = xattrs [ xattr "name" typeName
-                   , xattr "c:type" typeName
-                   ]
-    members = xelems $ map (functionToFragment "method") methods
-
-
 -- | Extract the name of a struct, stripping off leading underscores.  This is
 -- a fast heuristic to get rid of the manual name mangling used with:
 --
@@ -98,29 +105,8 @@ classToFragment typeName methods =
 --
 -- since we don't get to see typedefs in LLVM.
 toStructName :: CType -> Maybe String
-toStructName (CStruct n _) = Just $! dropWhile (=='_') n
+toStructName (CStruct n _) = Just $! demangleName n
 toStructName _ = Nothing
 
--- | Decompose a foreign library interface into methods attached to
--- objects, along with the rest of the (free) functions.
---
--- The matching is done on the type of the first argument IFF the
--- first argument is a pointer to a ref counted type more specific
--- than GObject.
---
--- FIXME: Also add constructors to the method list for an object
-groupByMethods :: LibraryInterface -> (Map String [ForeignFunction], [ForeignFunction])
-groupByMethods iface =
-  foldr classifyFunction (mempty, mempty) (libraryFunctions iface)
-  where
-    hasTypeAnnotation = not . null . snd
-    rcStructs = map fst $ filter hasTypeAnnotation (libraryTypes iface)
-    rcTypeNames = S.fromList $ mapMaybe toStructName rcStructs
-
-    classifyFunction f (m, freeFuncs) =
-      case foreignFunctionParameters f of
-        [Parameter (CPointer (CStruct name _)) _ _] ->
-          case S.member name rcTypeNames of
-            False -> (m, f : freeFuncs)
-            True -> (M.insertWith' (++) name [f] m, freeFuncs)
-        _ -> (m, f : freeFuncs)
+demangleName :: String -> String
+demangleName = dropWhile (=='_')
