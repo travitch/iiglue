@@ -11,6 +11,7 @@ import Data.Set ( Set )
 import qualified Data.Set as S
 import Data.Text ( Text )
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
 import System.Environment ( getArgs )
 import Text.Printf
 import Text.XML as XML
@@ -36,12 +37,18 @@ main = do
       girCursor = fromDocument girDoc
       freeFunctions = girCursor $// laxElement "function"
       methods = girCursor $// laxElement "method"
-      allFuncs = freeFunctions ++ methods
+      allFuncs = (tagFree freeFunctions) ++ (tagMethod methods)
       libIndex = indexLibrary iface
 
   mapM_ (examineFunction libIndex) allFuncs
 
   return ()
+
+tagFree :: [a] -> [(Bool, a)]
+tagFree = zip (repeat False)
+
+tagMethod :: [a] -> [(Bool, a)]
+tagMethod = zip (repeat True)
 
 indexLibrary :: LibraryInterface -> FunctionIndex
 indexLibrary iface =
@@ -60,13 +67,31 @@ lookupFunction (FunctionIndex functionIndex _) name =
   where
     errMsg = error ("Function not found " ++ show name)
 
-examineFunction :: FunctionIndex -> Cursor -> IO ()
-examineFunction functionIndex cur = do
+examineFunction :: FunctionIndex -> (Bool, Cursor) -> IO ()
+examineFunction functionIndex (isMethod, cur) = do
   let [name] = cur $| laxAttribute "identifier"
       ff = lookupFunction functionIndex name
       retCur = cur $/ laxElement "return-value"
-  print name
+      paramCurs = cur $// laxElement "parameter"
+      params = case isMethod of
+        True -> drop 1 (foreignFunctionParameters ff)
+        False -> foreignFunctionParameters ff
+  T.putStrLn name
   checkAllocator functionIndex ff retCur
+  mapM_ checkParam (zip params paramCurs)
+
+-- TODO: check escape, array, nullability (allow-none)
+checkParam :: (Parameter, Cursor) -> IO ()
+checkParam (p, cur) = do
+  let dir = cur $| laxAttribute "direction"
+  when (dir == ["out"] && not (isOutParam p)) $ do
+    printf "  Expected out parameter %s, but analysis disagrees\n" (parameterName p)
+  when (isOutParam p && dir /= ["out"]) $ do
+    printf "  Analysis claims that %s is an out param\n" (parameterName p)
+  return ()
+
+isOutParam :: Parameter -> Bool
+isOutParam = any (==PAOut) . parameterAnnotations
 
 isRefCountedType :: FunctionIndex -> Text -> Bool
 isRefCountedType functionIndex typeName =
@@ -79,11 +104,11 @@ checkAllocator functionIndex ff [retCur] =
       when (xfer == ["full"] && isRefCountedType functionIndex tyname) $ do
         -- This is only a problem if the type is not reference counted
         -- (since then the caller owns a reference)
-        printf "Expected full transfer of ownership in return value to imply %s is an allocator\n" fname
+        printf "  Expected full transfer of ownership in return value to imply %s is an allocator\n" fname
     True ->
       -- Default is transfer=full, so accept the empty list
       unless (xfer == ["full"] || xfer == []) $ do
-        printf "Expected allocator %s to fully transfer ownership: %s\n" fname (show xfer)
+        printf "  Expected allocator %s to fully transfer ownership: %s\n" fname (show xfer)
   where
     xfer = retCur $| laxAttribute "transfer-ownership"
     [[tyname]] = retCur $/ laxElement "type" &| laxAttribute "type"
