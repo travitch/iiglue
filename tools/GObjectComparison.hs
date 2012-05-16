@@ -77,11 +77,9 @@ indexLibrary iface =
     hasTypeAnnotation = not . null . snd
     annotatedTypes = map fst $ filter hasTypeAnnotation (libraryTypes iface)
 
-lookupFunction :: FunctionIndex -> Text -> ForeignFunction
+lookupFunction :: FunctionIndex -> Text -> Maybe ForeignFunction
 lookupFunction (FunctionIndex functionIndex _) name =
-  M.findWithDefault errMsg (T.unpack name) functionIndex
-  where
-    errMsg = error ("Function not found " ++ show name)
+  M.lookup (T.unpack name) functionIndex
 
 -- | Start a new environment for the current function.  After the
 -- function is analyzed (before this function returns), commit the
@@ -111,12 +109,16 @@ examineFunction functionIndex (isMethod, cur) = do
       -- If this is a method, drop the first parameter in the inferred
       -- parameter list since it is treated as an implicit "this" and
       -- does not have a node in the GIR
-      params = case isMethod of
-        True -> drop 1 (foreignFunctionParameters ff)
-        False -> foreignFunctionParameters ff
-  withFunction name $ do
-    checkAllocator functionIndex ff retCur
-    mapM_ checkParam (zip params paramCurs)
+
+  case ff of
+    Nothing -> return ()
+    Just ff' -> do
+      let params = case isMethod of
+            True -> drop 1 (foreignFunctionParameters ff')
+            False -> foreignFunctionParameters ff'
+      withFunction name $ do
+        checkAllocator functionIndex ff' retCur
+        mapM_ checkParam (zip params paramCurs)
 
 -- TODO: check escape, array, nullability (allow-none)
 checkParam :: (Parameter, Cursor) -> LogM ()
@@ -181,9 +183,9 @@ checkAllocator functionIndex ff [retCur] =
     xfer = retCur $| laxAttribute "transfer-ownership"
     tyname = case retCur $/ laxElement "type" &| laxAttribute "type" of
       [[tname]] -> tname
-      _ -> case retCur $// laxElement "type" &| laxAttribute "type" of
+      _ -> case retCur $// laxElement "array" &| laxAttribute "type" of
         [[tname]] -> tname
-        _ -> error "What is this"
+        _ -> error ("What is this " ++ (show ff))
     fname = foreignFunctionName ff
 checkAllocator _ ff _ =
   error ("Multiple return values for function " ++ foreignFunctionName ff)
