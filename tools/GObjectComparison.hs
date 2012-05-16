@@ -1,17 +1,18 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Main ( main ) where
 
-import Control.Monad ( unless, when )
+import Control.Monad.RWS
 import qualified Data.ByteString.Lazy as LBS
+import qualified Data.Foldable as F
 import Data.Map ( Map )
 import qualified Data.Map as M
 import Data.Maybe ( mapMaybe )
-import Data.Monoid
+import Data.Sequence ( Seq )
+import qualified Data.Sequence as Seq
 import Data.Set ( Set )
 import qualified Data.Set as S
 import Data.Text ( Text )
 import qualified Data.Text as T
-import qualified Data.Text.IO as T
 import System.Environment ( getArgs )
 import Text.Printf
 import Text.XML as XML
@@ -19,8 +20,23 @@ import Text.XML.Cursor as XML
 
 import Foreign.Inference.Interface
 
-import Debug.Trace
-debug = flip trace
+-- import Debug.Trace
+-- debug = flip trace
+
+-- | A diagnostic for a single function.  The first String is the
+-- function name and the list is a list of diagnostics for the
+-- function
+data Diag = Diag Text [String]
+
+instance Show Diag where
+  show = showDiag
+
+showDiag :: Diag -> String
+showDiag (Diag n ds) = printf "%s\n%s" (T.unpack n) ds'
+  where
+    ds' = unlines $ map (\s -> "  " ++ s) ds
+
+type LogM = RWS Text (Seq Diag) [String]
 
 data FunctionIndex =
   FunctionIndex {
@@ -40,8 +56,8 @@ main = do
       allFuncs = (tagFree freeFunctions) ++ (tagMethod methods)
       libIndex = indexLibrary iface
 
-  mapM_ (examineFunction libIndex) allFuncs
-
+  let (_, diags) = evalRWS (mapM_ (examineFunction libIndex) allFuncs) undefined []
+  F.mapM_ print diags
   return ()
 
 tagFree :: [a] -> [(Bool, a)]
@@ -67,28 +83,80 @@ lookupFunction (FunctionIndex functionIndex _) name =
   where
     errMsg = error ("Function not found " ++ show name)
 
-examineFunction :: FunctionIndex -> (Bool, Cursor) -> IO ()
+-- | Start a new environment for the current function.  After the
+-- function is analyzed (before this function returns), commit the
+-- diagnostics generated (if any) to the log.
+--
+-- Note that this function clears the State (which is meant to be
+-- function-local).
+withFunction :: Text -> LogM () -> LogM ()
+withFunction n a = put [] >> local (const n) a >> logDiagnostics n
+
+logDiagnostics :: Text -> LogM ()
+logDiagnostics n = do
+  s <- get
+  case null s of
+    True -> return ()
+    False -> tell $! Seq.singleton (Diag n s)
+
+reportDiagnostic :: String -> LogM ()
+reportDiagnostic s = modify (s:)
+
+examineFunction :: FunctionIndex -> (Bool, Cursor) -> LogM ()
 examineFunction functionIndex (isMethod, cur) = do
   let [name] = cur $| laxAttribute "identifier"
       ff = lookupFunction functionIndex name
       retCur = cur $/ laxElement "return-value"
       paramCurs = cur $// laxElement "parameter"
+      -- If this is a method, drop the first parameter in the inferred
+      -- parameter list since it is treated as an implicit "this" and
+      -- does not have a node in the GIR
       params = case isMethod of
         True -> drop 1 (foreignFunctionParameters ff)
         False -> foreignFunctionParameters ff
-  T.putStrLn name
-  checkAllocator functionIndex ff retCur
-  mapM_ checkParam (zip params paramCurs)
+  withFunction name $ do
+    checkAllocator functionIndex ff retCur
+    mapM_ checkParam (zip params paramCurs)
 
 -- TODO: check escape, array, nullability (allow-none)
-checkParam :: (Parameter, Cursor) -> IO ()
+checkParam :: (Parameter, Cursor) -> LogM ()
 checkParam (p, cur) = do
   let dir = cur $| laxAttribute "direction"
+      allowNone = cur $| laxAttribute "allow-none"
+      xfer = cur $| laxAttribute "transfer-ownership"
+
+  -- The out param checks are less useful right now because glib
+  -- treats all pointers to scalar types as out parameters by default.
+  -- This will be more useful for pointers to structs when we extend
+  -- the out param analysis to identify those.
   when (dir == ["out"] && not (isOutParam p)) $ do
-    printf "  Expected out parameter %s, but analysis disagrees\n" (parameterName p)
+    reportDiagnostic $ printf "Expected out parameter %s, but analysis disagrees" (parameterName p)
   when (isOutParam p && dir /= ["out"]) $ do
-    printf "  Analysis claims that %s is an out param\n" (parameterName p)
+    reportDiagnostic $ printf "Analysis claims that %s is an out param" (parameterName p)
+
+
+  -- allow-none is only specified as allow-none="1", meaning it is
+  -- never present for a not-null parameter.  When we infer PANotNull,
+  -- we expect an empty list.
+  when (allowNone == ["1"] && isNotNull p) $ do
+    reportDiagnostic $ printf "Expected parameter %s to be nonnull, analysis disagrees" (parameterName p)
+  when (isNotNull p && allowNone /= []) $ do
+    reportDiagnostic $ printf "Analysis claims %s is nonnull" (parameterName p)
+
+
+  -- The escape annotation has a lot of false positives right now.
+  -- Just check for cases where gir says a parameter escapes and
+  -- ensure we get that too.
+  when (xfer == ["full"] && not (isEscapeParam p)) $ do
+    reportDiagnostic $ printf "Analysis claims %s does not escape, gir says it is transfered" (parameterName p)
+
   return ()
+
+isEscapeParam :: Parameter -> Bool
+isEscapeParam = any (==PAEscape) . parameterAnnotations
+
+isNotNull :: Parameter -> Bool
+isNotNull = any (==PANotNull) . parameterAnnotations
 
 isOutParam :: Parameter -> Bool
 isOutParam = any (==PAOut) . parameterAnnotations
@@ -97,21 +165,25 @@ isRefCountedType :: FunctionIndex -> Text -> Bool
 isRefCountedType functionIndex typeName =
   S.member (T.unpack typeName) (functionIndexRCTypes functionIndex)
 
-checkAllocator :: FunctionIndex -> ForeignFunction -> [Cursor] -> IO ()
+checkAllocator :: FunctionIndex -> ForeignFunction -> [Cursor] -> LogM ()
 checkAllocator functionIndex ff [retCur] =
   case isAllocator ff of
     False -> do
       when (xfer == ["full"] && isRefCountedType functionIndex tyname) $ do
         -- This is only a problem if the type is not reference counted
         -- (since then the caller owns a reference)
-        printf "  Expected full transfer of ownership in return value to imply %s is an allocator\n" fname
+        reportDiagnostic $ printf "Expected full transfer of ownership in return value to imply %s is an allocator" fname
     True ->
       -- Default is transfer=full, so accept the empty list
       unless (xfer == ["full"] || xfer == []) $ do
-        printf "  Expected allocator %s to fully transfer ownership: %s\n" fname (show xfer)
+        reportDiagnostic $ printf "Expected allocator %s to fully transfer ownership: %s" fname (show xfer)
   where
     xfer = retCur $| laxAttribute "transfer-ownership"
-    [[tyname]] = retCur $/ laxElement "type" &| laxAttribute "type"
+    tyname = case retCur $/ laxElement "type" &| laxAttribute "type" of
+      [[tname]] -> tname
+      _ -> case retCur $// laxElement "type" &| laxAttribute "type" of
+        [[tname]] -> tname
+        _ -> error "What is this"
     fname = foreignFunctionName ff
 checkAllocator _ ff _ =
   error ("Multiple return values for function " ++ foreignFunctionName ff)
