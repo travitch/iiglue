@@ -31,7 +31,7 @@ import Foreign.Inference.Analysis.Output
 import Foreign.Inference.Analysis.RefCount
 import Foreign.Inference.Analysis.Return
 import Foreign.Inference.Analysis.ScalarEffects
-import Foreign.Inference.Analysis.SingleInitializer
+import Foreign.Inference.Analysis.IndirectCallResolver
 import Foreign.Inference.Analysis.Util.CompositeSummary
 
 -- Command line helpers
@@ -133,7 +133,7 @@ main = do
 
 dump :: Opts -> String -> Module -> IO ()
 dump opts name m = do
-  let pta = identifySingleInitializers m -- runPointsToAnalysis m
+  let pta = identifyIndirectCallTargets m
       cg = mkCallGraph m pta []
       deps = inputDependencies opts
       repo = repositoryLocation opts
@@ -144,18 +144,16 @@ dump opts name m = do
       annots <- loadAnnotations af
       return $! addLibraryAnnotations baseDeps annots
 
-  let sis = pta -- identifySingleInitializers m
-
   -- Have to give a type signature here to fix all of the FuncLike
   -- constraints to our metadata blob.
   let analyses :: [ComposableAnalysis AnalysisSummary FunctionMetadata]
       analyses = [ identifyReturns ds returnSummary
                  , identifyScalarEffects scalarEffectSummary
                  , identifyArrays ds arraySummary
-                 , identifyFinalizers ds sis finalizerSummary
+                 , identifyFinalizers ds pta finalizerSummary
                  , identifyEscapes ds escapeSummary
                  , identifyNullable ds nullableSummary returnSummary
-                 , identifyAllocators ds sis allocatorSummary escapeSummary finalizerSummary
+                 , identifyAllocators ds pta allocatorSummary escapeSummary finalizerSummary
                  , identifyOutput ds outputSummary allocatorSummary escapeSummary
                  , identifyRefCounting ds refCountSummary finalizerSummary scalarEffectSummary
                  ]
