@@ -15,7 +15,6 @@ import Codec.Archive
 import LLVM.Analysis
 import LLVM.Analysis.CallGraph
 import LLVM.Analysis.CallGraphSCCTraversal
-import LLVM.Analysis.PointsTo.TrivialFunction
 import LLVM.Parse
 
 import Foreign.Inference.Diagnostics
@@ -34,6 +33,9 @@ import Foreign.Inference.Analysis.Return
 import Foreign.Inference.Analysis.ScalarEffects
 import Foreign.Inference.Analysis.SingleInitializer
 import Foreign.Inference.Analysis.Util.CompositeSummary
+
+import Debug.Trace
+debug = flip trace
 
 -- Command line helpers
 addDependency :: String -> Opts -> Either String Opts
@@ -134,7 +136,7 @@ main = do
 
 dump :: Opts -> String -> Module -> IO ()
 dump opts name m = do
-  let pta = runPointsToAnalysis m
+  let pta = identifySingleInitializers m -- runPointsToAnalysis m
       cg = mkCallGraph m pta []
       deps = inputDependencies opts
       repo = repositoryLocation opts
@@ -145,7 +147,7 @@ dump opts name m = do
       annots <- loadAnnotations af
       return $! addLibraryAnnotations baseDeps annots
 
-  let sis = identifySingleInitializers m
+  let sis = pta -- identifySingleInitializers m
 
   -- Have to give a type signature here to fix all of the FuncLike
   -- constraints to our metadata blob.
@@ -155,9 +157,9 @@ dump opts name m = do
                  , identifyArrays ds arraySummary
                  , identifyFinalizers ds sis finalizerSummary
                  , identifyEscapes ds escapeSummary
-                 , identifyOutput ds outputSummary
                  , identifyNullable ds nullableSummary returnSummary
                  , identifyAllocators ds sis allocatorSummary escapeSummary finalizerSummary
+                 , identifyOutput ds outputSummary allocatorSummary escapeSummary
                  , identifyRefCounting ds refCountSummary finalizerSummary scalarEffectSummary
                  ]
       analysisFunction = callGraphComposeAnalysis analyses
