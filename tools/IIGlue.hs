@@ -34,9 +34,6 @@ import Foreign.Inference.Analysis.ScalarEffects
 import Foreign.Inference.Analysis.SingleInitializer
 import Foreign.Inference.Analysis.Util.CompositeSummary
 
-import Debug.Trace
-debug = flip trace
-
 -- Command line helpers
 addDependency :: String -> Opts -> Either String Opts
 addDependency dep opts =
