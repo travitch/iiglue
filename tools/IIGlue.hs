@@ -2,6 +2,7 @@ module Main ( main ) where
 
 import Control.Applicative
 import Control.Exception ( tryJust )
+import Control.Monad ( guard )
 import Data.Lens.Common
 import Data.Monoid
 import Options.Applicative
@@ -20,7 +21,6 @@ import Foreign.Inference.Diagnostics
 import Foreign.Inference.Interface
 import Foreign.Inference.Report
 import Foreign.Inference.Preprocessing
-import Foreign.Inference.AnalysisMonad hiding ( reader )
 import Foreign.Inference.Analysis.Allocator
 import Foreign.Inference.Analysis.Array
 import Foreign.Inference.Analysis.Escape

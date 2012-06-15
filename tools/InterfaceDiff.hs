@@ -1,9 +1,8 @@
 module Main ( main ) where
 
-import Control.Monad ( when )
+import Control.Applicative
 import qualified Data.ByteString.Lazy.Char8 as BS
-import System.Console.CmdArgs.Explicit
-import System.Console.CmdArgs.Text
+import Options.Applicative
 import System.Exit
 
 import Foreign.Inference.Interface
@@ -11,8 +10,8 @@ import Foreign.Inference.Interface.Diff
 
 data Opts =
   Opts { outputFormat :: OutputFormat
-       , inputs :: [FilePath]
-       , wantsHelp :: Bool
+       , oldInput :: FilePath
+       , newInput :: FilePath
        }
 
 data OutputFormat = None
@@ -20,47 +19,29 @@ data OutputFormat = None
                   | Text
                   deriving (Eq, Ord, Show, Read)
 
-defOpts :: Opts
-defOpts = Opts Text [] False
-
-cmdOpts :: Opts -> Mode Opts
-cmdOpts defs = mode "InterfaceDiff" defs desc positionals as
-  where
-    desc = "A diff utility for interface descriptions"
-    positionals = flagArg addInterface "[INTERFACE] [INTERFACE]"
-    as = [ flagReq ["format", "f"] setFormat "FORMAT" "The output format.  One of None, Html, or Text (default Text)"
-         , flagHelpSimple setHelp
-         ]
-
-setHelp :: Opts -> Opts
-setHelp opts = opts { wantsHelp = True }
-
-setFormat :: String -> Opts -> Either String Opts
-setFormat f opts =
-  case reads f of
-    [] -> Left $ "Invalid format: " ++ f
-    [(fmt, "")] -> Right opts { outputFormat = fmt }
-    _ -> Left $ "Invalid format: " ++ f
-
-addInterface :: String -> Opts -> Either String Opts
-addInterface p opts
-  | length (inputs opts) == 2 = Left "Exactly two interface files are required"
-  | otherwise = Right opts { inputs = inputs opts ++ [p] }
-
-showHelpAndExit :: Mode a -> IO b -> IO b
-showHelpAndExit args exitCmd = do
-  putStrLn $ showText (Wrap 80) $ helpText [] HelpFormatOne args
-  exitCmd
+cmdOpts :: Parser Opts
+cmdOpts = Opts
+  <$> option
+      ( long "format"
+      & short 'f'
+      & metavar "FORMAT"
+      & help "The output format.  One of None, Html, or Text (default Text)"
+      & value Text)
+  <*> argument str ( metavar "OLDIFACE" )
+  <*> argument str ( metavar "NEWIFACE" )
 
 main :: IO ()
-main = do
-  let arguments = cmdOpts defOpts
-  opts <- processArgs arguments
+main = execParser args >>= realMain
+  where
+    args = info (helper <*> cmdOpts)
+      ( fullDesc
+      & progDesc "Display the differences in inferred anntations between OLDIFACE and NEWIFACE"
+      & header "InterfaceDiff - structured diff for library interfaces")
 
-  when (wantsHelp opts) (showHelpAndExit arguments exitSuccess)
-  when (length (inputs opts) /= 2) (showHelpAndExit arguments exitFailure)
-
-  let [oldPath, newPath] = inputs opts
+realMain :: Opts -> IO ()
+realMain opts = do
+  let oldPath = oldInput opts
+      newPath = newInput opts
 
   oldInterface <- readLibraryInterface oldPath
   newInterface <- readLibraryInterface newPath

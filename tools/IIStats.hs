@@ -1,61 +1,44 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Main ( main ) where
 
-import Control.Monad ( forM_, when )
-import Data.Default
+import Control.Applicative
+import Control.Monad ( forM_ )
 import Data.Map ( Map )
 import qualified Data.Map as M
 import Data.Monoid
 import qualified Data.Text.Lazy.IO as T
-import System.Console.CmdArgs.Explicit
-import System.Console.CmdArgs.Text
-import System.Exit
+import Options.Applicative
 import Text.Blaze.Html5 ( Html, toHtml )
 import qualified Text.Blaze.Html5 as H
 import Text.Blaze.Html.Renderer.Text as T
 
 import Foreign.Inference.Interface
 
-data Opts = Opts { wantsHelp :: Bool
-                 , ignoredAnnotations :: [ParamAnnotation]
+data Opts = Opts { ignoredAnnotations :: [ParamAnnotation]
                  , interfaceFiles :: [FilePath]
                  }
           deriving (Show)
 
-instance Default Opts where
-  def = Opts { wantsHelp = False
-             , ignoredAnnotations = []
-             , interfaceFiles = []
-             }
-
-setHelp :: Opts -> Opts
-setHelp o = o { wantsHelp = True }
-
-addIgnored :: String -> Opts -> Either String Opts
-addIgnored a o =
-  case reads a of
-    [(annot, "")] -> Right o { ignoredAnnotations = annot : ignoredAnnotations o }
-    _ -> Left ("Invalid annotation " ++ a)
-
-addInterface :: String -> Opts -> Either String Opts
-addInterface f o = Right o { interfaceFiles = f : interfaceFiles o }
-
-cmdOpts :: Mode Opts
-cmdOpts = mode "IIStats" def desc ifaceArg as
-  where
-    ifaceArg = flagArg addInterface "FILE"
-    desc = "Compute aggregate stats for interfaces"
-    as = [ flagHelpSimple setHelp
-         , flagReq ["ignore"] addIgnored "ANNOTATION" "Ignore an annotation.  Can be specified multiple times"
-         ]
+cmdOpts :: Parser Opts
+cmdOpts = Opts
+  <$> option
+      ( long "ignore"
+      & short 'i'
+      & multi
+      & metavar "ANNOTATION"
+      & help "Ignore an annotation.  Can be specified multiple times")
+  <*> arguments str ( metavar "FILE" )
 
 main :: IO ()
-main = do
-  opts <- processArgs cmdOpts
-  when (wantsHelp opts) $ do
-    putStrLn $ showText (Wrap 80) $ helpText [] HelpFormatOne cmdOpts
-    exitSuccess
+main = execParser args >>= realMain
+  where
+    args = info (helper <*> cmdOpts)
+      ( fullDesc
+      & progDesc "Compute aggregate statistics for FILEs"
+      & header "iistats - report interface statistics")
 
+realMain :: Opts -> IO ()
+realMain opts = do
   interfaces <- mapM readLibraryInterface (interfaceFiles opts)
   let stats = map (interfaceStats (ignoredAnnotations opts)) interfaces
       h = renderStatsHTML stats
@@ -69,7 +52,7 @@ renderStatsHTML stats = H.docTypeHtml $ do
     mapM_ renderStatsTable stats
     renderStatsTable (mconcat stats)
     H.p $ do
-      "Annotated Percent List = "
+      _ <- "Annotated Percent List = "
       toHtml (show pctList)
   where
     pctList = map annotatedFunctionPercent stats
