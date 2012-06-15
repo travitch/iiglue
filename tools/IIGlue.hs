@@ -1,12 +1,11 @@
 module Main ( main ) where
 
+import Control.Applicative
 import Control.Exception ( tryJust )
 import Data.Lens.Common
 import Data.Monoid
-import System.Console.CmdArgs.Explicit
-import System.Console.CmdArgs.Text
+import Options.Applicative
 import System.Environment ( getEnv )
-import System.Exit
 import System.FilePath
 import System.IO.Error ( isDoesNotExistError )
 
@@ -21,7 +20,7 @@ import Foreign.Inference.Diagnostics
 import Foreign.Inference.Interface
 import Foreign.Inference.Report
 import Foreign.Inference.Preprocessing
-import Foreign.Inference.AnalysisMonad
+import Foreign.Inference.AnalysisMonad hiding ( reader )
 import Foreign.Inference.Analysis.Allocator
 import Foreign.Inference.Analysis.Array
 import Foreign.Inference.Analysis.Escape
@@ -34,101 +33,80 @@ import Foreign.Inference.Analysis.ScalarEffects
 import Foreign.Inference.Analysis.IndirectCallResolver
 import Foreign.Inference.Analysis.Util.CompositeSummary
 
--- Command line helpers
-addDependency :: String -> Opts -> Either String Opts
-addDependency dep opts =
-  Right opts { inputDependencies = dep : inputDependencies opts }
-
-setBitcode :: String -> Opts -> Either String Opts
-setBitcode inf opts@Opts { inputFile = [] } = Right opts { inputFile = [inf] }
-setBitcode _ _ = Left "Only one input library is allowed"
-
-setRepository :: String -> Opts -> Either String Opts
-setRepository r opts = Right opts { repositoryLocation = r }
-
-setSource :: String -> Opts -> Either String Opts
-setSource s opts = Right opts { librarySource = Just s }
-
-setReportDir :: String -> Opts -> Either String Opts
-setReportDir d opts = Right opts { reportDir = Just d }
-
-setDiagnostics :: String -> Opts -> Either String Opts
-setDiagnostics d opts =
-  case reads d of
-    [] -> Left $ "Invalid diagnostic level: " ++ d
-    [(diagLevel, "")] -> Right opts { diagnosticLevel = diagLevel }
-    _ -> Left $ "Invalid diagnostic level: " ++ d
-
-setAnnotations :: String -> Opts -> Either String Opts
-setAnnotations a opts = Right opts { annotationFile = Just a }
-
-setHelp :: Opts -> Opts
-setHelp opts = opts { wantsHelp = True }
-
-cmdOpts :: Opts -> Mode Opts
-cmdOpts defs = mode "IIGlue" defs desc bitcodeArg as
-  where
-    bitcodeArg = (flagArg setBitcode "BITCODE")
-    desc = "A frontend for the FFI Inference engine"
-    as = [ flagReq ["dependency"] addDependency "DEPENDENCY" "A dependency of the library being analyzed."
-         , flagReq ["repository"] setRepository "DIRECTORY" "The directory containing dependency summaries.  The summary of the input library will be stored here. (Default: consult environment)"
-         , flagReq ["diagnostics"] setDiagnostics "DIAGNOSTIC" "The level of diagnostics to show (Debug, Info, Warning, Error).  Default: Warning"
-         , flagReq ["source"] setSource "FILE" "The source for the library being analyzed (tarball or zip archive).  If provided, a report will be generated"
-         , flagReq ["reportDir"] setReportDir "DIRECTORY" "The directory in which the summary report will be produced.  Defaults to the REPOSITORY."
-         , flagReq ["annotations"] setAnnotations "FILE" "An optional file containing annotations for the library being analyzed"
-         , flagHelpSimple setHelp
-         ]
-
 -- | The repository location is first chosen based on an environment
 -- variable.  The command line argument, if specified, will override
 -- it.  If the environment variable is not set, the command line
 -- argument must be specified.
 data Opts = Opts { inputDependencies :: [String]
                  , repositoryLocation :: FilePath
+                 , diagnosticLevel :: Classification
                  , librarySource :: Maybe FilePath
                  , reportDir :: Maybe FilePath
-                 , inputFile :: [FilePath]
-                 , diagnosticLevel :: Classification
                  , annotationFile :: Maybe FilePath
-                 , wantsHelp :: Bool
+                 , inputFile :: FilePath
                  }
           deriving (Show)
 
-defOpts :: FilePath -> Opts
-defOpts rl = Opts { inputDependencies = []
-                  , repositoryLocation = rl
-                  , librarySource = Nothing
-                  , reportDir = Nothing
-                  , inputFile = []
-                  , diagnosticLevel = Info
-                  , annotationFile = Nothing
-                  , wantsHelp = False
-                  }
-
-
-showHelpAndExit :: Mode a -> IO b -> IO b
-showHelpAndExit arguments exitCmd = do
-  putStrLn $ showText (Wrap 80) $ helpText [] HelpFormatOne arguments
-  exitCmd
+cmdOpts :: FilePath -> Parser Opts
+cmdOpts defaultRepo = Opts
+          <$> strOption
+              ( long "dependency"
+              & short 'd'
+              & metavar "DEPENDENCY"
+              & multi
+              & help "A dependency of the library being analyzed.")
+          <*> strOption
+              ( long "repository"
+              & short 'r'
+              & metavar "DIRECTORY"
+              & value defaultRepo
+              & help "The directory containing dependency summaries.  The summary of the input library will be stored here. (Default: consult environment)")
+          <*> option
+              ( long "diagnostics"
+              & metavar "DIAGNOSTIC"
+              & value Warning
+              & help "The level of diagnostics to show (Debug, Info, Warning, Error).  Default: Warning" )
+          <*> option
+              ( long "source"
+              & short 's'
+              & metavar "FILE"
+              & help "The source for the library being analyzed (tarball or zip archive).  If provided, a report will be generated"
+              & value Nothing
+              & reader (Just . auto))
+          <*> option
+              ( long "reportDir"
+              & metavar "DIRECTORY"
+              & help "The directory in which the summary report will be produced.  Defaults to the REPOSITORY."
+              & value Nothing
+              & reader (Just . auto))
+          <*> option
+              ( long "annotations"
+              & short 'a'
+              & metavar "FILE"
+              & help "An optional file containing annotations for the library being analyzed."
+              & value Nothing
+              & reader (Just . auto))
+          <*> argument str ( metavar "FILE" )
 
 
 main :: IO ()
 main = do
   mRepLoc <- tryJust (guard . isDoesNotExistError) (getEnv "INFERENCE_REPOSITORY")
   let repLoc = either (error "No dependency repository specified") id mRepLoc
-      defs = defOpts repLoc
-      arguments = cmdOpts defs
-  opts <- processArgs arguments
+      args = info (helper <*> cmdOpts repLoc)
+        ( fullDesc
+        & progDesc "Infer interface annotations for FILE (which can be bitcode or llvm assembly)"
+        & header "iiglue - A frontend for the FFI Inference engine")
 
-  when (wantsHelp opts) (showHelpAndExit arguments exitSuccess)
-  when (length (inputFile opts) /= 1) (showHelpAndExit arguments exitFailure)
+  execParser args >>= realMain
 
-  let [inFile] = inputFile opts
-      name = takeBaseName inFile
+realMain :: Opts -> IO ()
+realMain opts = do
+  let name = takeBaseName (inputFile opts)
       parseOpts = case librarySource opts of
         Nothing -> defaultParserOptions { metaPositionPrecision = PositionNone }
         Just _ -> defaultParserOptions
-  mm <- readBitcode (parseLLVMFile parseOpts) inFile
+  mm <- readBitcode (parseLLVMFile parseOpts) (inputFile opts)
   either error (dump opts name) mm
 
 dump :: Opts -> String -> Module -> IO ()
