@@ -72,20 +72,20 @@ cmdOpts defaultRepo = Opts
               & metavar "FILE"
               & help "The source for the library being analyzed (tarball or zip archive).  If provided, a report will be generated"
               & value Nothing
-              & reader (Just . auto))
+              & reader (Just . str))
           <*> option
               ( long "reportDir"
               & metavar "DIRECTORY"
               & help "The directory in which the summary report will be produced.  Defaults to the REPOSITORY."
               & value Nothing
-              & reader (Just . auto))
+              & reader (Just . str))
           <*> option
               ( long "annotations"
               & short 'a'
               & metavar "FILE"
               & help "An optional file containing annotations for the library being analyzed."
               & value Nothing
-              & reader (Just . auto))
+              & reader (Just . str))
           <*> argument str ( metavar "FILE" )
 
 
