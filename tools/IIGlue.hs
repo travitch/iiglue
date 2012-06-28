@@ -129,7 +129,7 @@ dump opts name m = do
                  , identifyScalarEffects scalarEffectSummary
                  , identifyArrays ds arraySummary
                  , identifyFinalizers ds pta finalizerSummary
-                 , identifyEscapes ds escapeSummary
+                 , identifyEscapes ds pta escapeSummary
                  , identifyNullable ds nullableSummary returnSummary
                  , identifyAllocators ds pta allocatorSummary escapeSummary finalizerSummary
                  , identifyOutput ds outputSummary allocatorSummary escapeSummary
