@@ -49,12 +49,11 @@ data Opts = Opts { inputDependencies :: [String]
 
 cmdOpts :: FilePath -> Parser Opts
 cmdOpts defaultRepo = Opts
-          <$> strOption
+          <$> many (strOption
               ( long "dependency"
               & short 'd'
               & metavar "DEPENDENCY"
-              & multi
-              & help "A dependency of the library being analyzed.")
+              & help "A dependency of the library being analyzed."))
           <*> strOption
               ( long "repository"
               & short 'r'

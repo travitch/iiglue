@@ -21,12 +21,11 @@ data Opts = Opts { ignoredAnnotations :: [ParamAnnotation]
 
 cmdOpts :: Parser Opts
 cmdOpts = Opts
-  <$> option
+  <$> many (option
       ( long "ignore"
       & short 'i'
-      & multi
       & metavar "ANNOTATION"
-      & help "Ignore an annotation.  Can be specified multiple times")
+      & help "Ignore an annotation.  Can be specified multiple times"))
   <*> arguments str ( metavar "FILE" )
 
 main :: IO ()
