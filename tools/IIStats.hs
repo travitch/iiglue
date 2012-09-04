@@ -51,7 +51,7 @@ renderStatsHTML stats = H.docTypeHtml $ do
     mapM_ renderStatsTable stats
     renderStatsTable (mconcat stats)
     H.p $ do
-      _ <- "Annotated Percent List = "
+      stringToHtml "Annotated Percent List = "
       toHtml (show pctList)
   where
     pctList = map annotatedFunctionPercent stats
@@ -155,3 +155,6 @@ funcHasAnnotation ignored ff =
     params = foreignFunctionParameters ff
     hasParamAnnotations = not . null . filter notIgnored . parameterAnnotations
     notIgnored = not . (`elem` ignored)
+
+stringToHtml :: String -> Html
+stringToHtml = toHtml

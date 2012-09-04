@@ -2,8 +2,8 @@ module Main ( main ) where
 
 import Control.Applicative
 import Control.Exception ( tryJust )
+import Control.Lens hiding ( rep, value )
 import Control.Monad ( guard )
-import Data.Lens.Common
 import Data.Monoid
 import Options.Applicative
 import System.Environment ( getEnv )
@@ -65,26 +65,21 @@ cmdOpts defaultRepo = Opts
               & metavar "DIAGNOSTIC"
               & value Warning
               & help "The level of diagnostics to show (Debug, Info, Warning, Error).  Default: Warning" )
-          <*> option
+          <*> optional (strOption
               ( long "source"
               & short 's'
               & metavar "FILE"
-              & help "The source for the library being analyzed (tarball or zip archive).  If provided, a report will be generated"
-              & value Nothing
-              & reader (Just . str))
-          <*> option
+              & help "The source for the library being analyzed (tarball or zip archive).  If provided, a report will be generated"))
+          <*> optional (strOption
               ( long "reportDir"
+              & short 'p'
               & metavar "DIRECTORY"
-              & help "The directory in which the summary report will be produced.  Defaults to the REPOSITORY."
-              & value Nothing
-              & reader (Just . str))
-          <*> option
+              & help "The directory in which the summary report will be produced.  Defaults to the REPOSITORY."))
+          <*> optional (strOption
               ( long "annotations"
               & short 'a'
               & metavar "FILE"
-              & help "An optional file containing annotations for the library being analyzed."
-              & value Nothing
-              & reader (Just . str))
+              & help "An optional file containing annotations for the library being analyzed."))
           <*> argument str ( metavar "FILE" )
 
 
@@ -138,7 +133,7 @@ dump opts name m = do
       analysisResult =
         parallelCallGraphSCCTraversal cg analysisFunction mempty
 
-      diags = mconcat $ extractSummary analysisResult (getL diagnosticLens)
+      diags = mconcat $ extractSummary analysisResult (view diagnosticLens)
       summaries = extractSummary analysisResult ModuleSummary
 
   case formatDiagnostics (diagnosticLevel opts) diags of
