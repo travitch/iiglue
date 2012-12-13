@@ -2,7 +2,7 @@ module Main ( main ) where
 
 import Control.Applicative
 import Control.Exception ( tryJust )
-import Control.Lens hiding ( rep, value )
+import Control.Lens ( (.~), view )
 import Control.Monad ( guard )
 import Data.Monoid
 import Options.Applicative
