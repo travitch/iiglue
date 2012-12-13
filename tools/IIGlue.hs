@@ -23,6 +23,7 @@ import Foreign.Inference.Report
 import Foreign.Inference.Preprocessing
 import Foreign.Inference.Analysis.Allocator
 import Foreign.Inference.Analysis.Array
+import Foreign.Inference.Analysis.ErrorHandling
 import Foreign.Inference.Analysis.Escape
 import Foreign.Inference.Analysis.Finalize
 import Foreign.Inference.Analysis.Nullable
@@ -132,9 +133,12 @@ dump opts name m = do
       analysisFunction = callGraphComposeAnalysis analyses
       analysisResult =
         parallelCallGraphSCCTraversal cg analysisFunction mempty
-
-      diags = mconcat $ extractSummary analysisResult (view diagnosticLens)
-      summaries = extractSummary analysisResult ModuleSummary
+      funcLikes :: [FunctionMetadata]
+      funcLikes = map fromFunction (moduleDefinedFunctions m)
+      errRes = identifyErrorHandling funcLikes ds pta -- errorHandlingSummary
+      analysisResult' = (errorHandlingSummary .~ errRes) analysisResult
+      diags = mconcat $ extractSummary analysisResult' (view diagnosticLens)
+      summaries = extractSummary analysisResult' ModuleSummary
 
   case formatDiagnostics (diagnosticLevel opts) diags of
     Nothing -> return ()
