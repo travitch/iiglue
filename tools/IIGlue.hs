@@ -31,6 +31,7 @@ import Foreign.Inference.Analysis.Output
 import Foreign.Inference.Analysis.RefCount
 import Foreign.Inference.Analysis.Return
 import Foreign.Inference.Analysis.ScalarEffects
+import Foreign.Inference.Analysis.Transfer
 import Foreign.Inference.Analysis.IndirectCallResolver
 import Foreign.Inference.Analysis.Util.CompositeSummary
 
@@ -117,28 +118,61 @@ dump opts name m = do
       annots <- loadAnnotations af
       return $! addLibraryAnnotations baseDeps annots
 
+  -- FIXME: adapt the parallelCallGraphSCCTraversal to accept a list
+  -- of FuncLikes so that we can share one set among the two global
+  -- passes and the two SCC traversals
+
   -- Have to give a type signature here to fix all of the FuncLike
   -- constraints to our metadata blob.
-  let analyses :: [ComposableAnalysis AnalysisSummary FunctionMetadata]
-      analyses = [ identifyReturns ds returnSummary
-                 , identifyScalarEffects scalarEffectSummary
-                 , identifyArrays ds arraySummary
-                 , identifyFinalizers ds pta finalizerSummary
-                 , identifyEscapes ds pta escapeSummary
-                 , identifyNullable ds nullableSummary returnSummary
-                 , identifyAllocators ds pta allocatorSummary escapeSummary finalizerSummary
-                 , identifyOutput ds outputSummary allocatorSummary escapeSummary
-                 , identifyRefCounting ds refCountSummary finalizerSummary scalarEffectSummary
-                 ]
-      analysisFunction = callGraphComposeAnalysis analyses
-      analysisResult =
-        parallelCallGraphSCCTraversal cg analysisFunction mempty
-      funcLikes :: [FunctionMetadata]
+  let funcLikes :: [FunctionMetadata]
       funcLikes = map fromFunction (moduleDefinedFunctions m)
-      errRes = identifyErrorHandling funcLikes ds pta -- errorHandlingSummary
-      analysisResult' = (errorHandlingSummary .~ errRes) analysisResult
-      diags = mconcat $ extractSummary analysisResult' (view diagnosticLens)
-      summaries = extractSummary analysisResult' ModuleSummary
+      errRes = identifyErrorHandling funcLikes ds pta
+      res0 = (errorHandlingSummary .~ errRes) mempty
+      phase1 :: [ComposableAnalysis AnalysisSummary FunctionMetadata]
+      phase1 = [ identifyReturns ds returnSummary
+               , identifyScalarEffects scalarEffectSummary
+               , identifyArrays ds arraySummary
+               , identifyFinalizers ds pta finalizerSummary
+               , identifyEscapes ds pta escapeSummary
+               , identifyRefCounting ds refCountSummary finalizerSummary scalarEffectSummary
+               ]
+      phase1Func = callGraphComposeAnalysis phase1
+      phase1Res = parallelCallGraphSCCTraversal cg phase1Func res0
+      -- The transferRes includes (builds on) the phase1Res.  The
+      -- transfer analysis depends on finalizers (and maybe escape)
+      transferRes = identifyTransfers funcLikes ds pta phase1Res transferSummary
+      -- Phase2 depends on the results of the transfer analysis (and
+      -- the error analysis)
+      phase2 :: [ComposableAnalysis AnalysisSummary FunctionMetadata]
+      phase2 = [ identifyAllocators ds pta allocatorSummary escapeSummary finalizerSummary -- transferSummary
+               , identifyOutput ds outputSummary allocatorSummary escapeSummary -- transferSummary
+                 -- Nullable will depend on the error analysis result
+               , identifyNullable ds nullableSummary returnSummary
+               ]
+      phase2Func = callGraphComposeAnalysis phase2
+      phase2Res = parallelCallGraphSCCTraversal cg phase2Func transferRes
+      -- Extract the diagnostics from each analysis and combine them
+      diags = mconcat $ extractSummary phase2Res (view diagnosticLens)
+      -- Now just take the summaries
+      summaries = extractSummary phase2Res ModuleSummary
+  -- let analyses :: [ComposableAnalysis AnalysisSummary FunctionMetadata]
+  --     analyses = [ identifyReturns ds returnSummary
+  --                , identifyScalarEffects scalarEffectSummary
+  --                , identifyArrays ds arraySummary
+  --                , identifyFinalizers ds pta finalizerSummary
+  --                , identifyEscapes ds pta escapeSummary
+  --                , identifyNullable ds nullableSummary returnSummary
+  --                , identifyAllocators ds pta allocatorSummary escapeSummary finalizerSummary
+  --                , identifyOutput ds outputSummary allocatorSummary escapeSummary
+  --                , identifyRefCounting ds refCountSummary finalizerSummary scalarEffectSummary
+  --                ]
+  --     analysisFunction = callGraphComposeAnalysis analyses
+  --     analysisResult =
+  --       parallelCallGraphSCCTraversal cg analysisFunction mempty
+  --     errRes = identifyErrorHandling funcLikes ds pta -- errorHandlingSummary
+  --     analysisResult' = (errorHandlingSummary .~ errRes) analysisResult
+  --     diags = mconcat $ extractSummary analysisResult' (view diagnosticLens)
+  --     summaries = extractSummary analysisResult' ModuleSummary
 
   case formatDiagnostics (diagnosticLevel opts) diags of
     Nothing -> return ()
