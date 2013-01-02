@@ -23,9 +23,9 @@ cmdOpts :: Parser Opts
 cmdOpts = Opts
   <$> many (option
       ( long "ignore"
-      & short 'i'
-      & metavar "ANNOTATION"
-      & help "Ignore an annotation.  Can be specified multiple times"))
+      <> short 'i'
+      <> metavar "ANNOTATION"
+      <> help "Ignore an annotation.  Can be specified multiple times"))
   <*> arguments str ( metavar "FILE" )
 
 main :: IO ()
@@ -33,8 +33,8 @@ main = execParser args >>= realMain
   where
     args = info (helper <*> cmdOpts)
       ( fullDesc
-      & progDesc "Compute aggregate statistics for FILEs"
-      & header "iistats - report interface statistics")
+      <> progDesc "Compute aggregate statistics for FILEs"
+      <> header "iistats - report interface statistics")
 
 realMain :: Opts -> IO ()
 realMain opts = do

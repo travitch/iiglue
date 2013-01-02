@@ -23,10 +23,10 @@ cmdOpts :: Parser Opts
 cmdOpts = Opts
   <$> option
       ( long "format"
-      & short 'f'
-      & metavar "FORMAT"
-      & help "The output format.  One of None, Html, or Text (default Text)"
-      & value Text)
+      <> short 'f'
+      <> metavar "FORMAT"
+      <> help "The output format.  One of None, Html, or Text (default Text)"
+      <> value Text)
   <*> argument str ( metavar "OLDIFACE" )
   <*> argument str ( metavar "NEWIFACE" )
 
@@ -35,8 +35,8 @@ main = execParser args >>= realMain
   where
     args = info (helper <*> cmdOpts)
       ( fullDesc
-      & progDesc "Display the differences in inferred anntations between OLDIFACE and NEWIFACE"
-      & header "InterfaceDiff - structured diff for library interfaces")
+      <> progDesc "Display the differences in inferred anntations between OLDIFACE and NEWIFACE"
+      <> header "InterfaceDiff - structured diff for library interfaces")
 
 realMain :: Opts -> IO ()
 realMain opts = do

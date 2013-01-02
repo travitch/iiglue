@@ -53,35 +53,35 @@ cmdOpts :: FilePath -> Parser Opts
 cmdOpts defaultRepo = Opts
           <$> many (strOption
               ( long "dependency"
-              & short 'd'
-              & metavar "DEPENDENCY"
-              & help "A dependency of the library being analyzed."))
+              <> short 'd'
+              <> metavar "DEPENDENCY"
+              <> help "A dependency of the library being analyzed."))
           <*> strOption
               ( long "repository"
-              & short 'r'
-              & metavar "DIRECTORY"
-              & value defaultRepo
-              & help "The directory containing dependency summaries.  The summary of the input library will be stored here. (Default: consult environment)")
+              <> short 'r'
+              <> metavar "DIRECTORY"
+              <> value defaultRepo
+              <> help "The directory containing dependency summaries.  The summary of the input library will be stored here. (Default: consult environment)")
           <*> option
               ( long "diagnostics"
-              & metavar "DIAGNOSTIC"
-              & value Warning
-              & help "The level of diagnostics to show (Debug, Info, Warning, Error).  Default: Warning" )
+              <> metavar "DIAGNOSTIC"
+              <> value Warning
+              <> help "The level of diagnostics to show (Debug, Info, Warning, Error).  Default: Warning" )
           <*> optional (strOption
               ( long "source"
-              & short 's'
-              & metavar "FILE"
-              & help "The source for the library being analyzed (tarball or zip archive).  If provided, a report will be generated"))
+              <> short 's'
+              <> metavar "FILE"
+              <> help "The source for the library being analyzed (tarball or zip archive).  If provided, a report will be generated"))
           <*> optional (strOption
               ( long "reportDir"
-              & short 'p'
-              & metavar "DIRECTORY"
-              & help "The directory in which the summary report will be produced.  Defaults to the REPOSITORY."))
+              <> short 'p'
+              <> metavar "DIRECTORY"
+              <> help "The directory in which the summary report will be produced.  Defaults to the REPOSITORY."))
           <*> optional (strOption
               ( long "annotations"
-              & short 'a'
-              & metavar "FILE"
-              & help "An optional file containing annotations for the library being analyzed."))
+              <> short 'a'
+              <> metavar "FILE"
+              <> help "An optional file containing annotations for the library being analyzed."))
           <*> argument str ( metavar "FILE" )
 
 
@@ -91,8 +91,8 @@ main = do
   let repLoc = either (error "No dependency repository specified") id mRepLoc
       args = info (helper <*> cmdOpts repLoc)
         ( fullDesc
-        & progDesc "Infer interface annotations for FILE (which can be bitcode or llvm assembly)"
-        & header "iiglue - A frontend for the FFI Inference engine")
+        <> progDesc "Infer interface annotations for FILE (which can be bitcode or llvm assembly)"
+        <> header "iiglue - A frontend for the FFI Inference engine")
 
   execParser args >>= realMain
 
