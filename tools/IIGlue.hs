@@ -15,6 +15,7 @@ import Codec.Archive
 import LLVM.Analysis
 import LLVM.Analysis.CallGraph
 import LLVM.Analysis.CallGraphSCCTraversal
+import LLVM.Analysis.Util.Testing
 import LLVM.Parse
 
 import Foreign.Inference.Diagnostics
@@ -102,7 +103,7 @@ realMain opts = do
       parseOpts = case librarySource opts of
         Nothing -> defaultParserOptions { metaPositionPrecision = PositionNone }
         Just _ -> defaultParserOptions
-  mm <- readBitcode (parseLLVMFile parseOpts) (inputFile opts)
+  mm <- buildModule requiredOptimizations (parseLLVMFile parseOpts) (inputFile opts)
   either error (dump opts name) mm
 
 dump :: Opts -> String -> Module -> IO ()
