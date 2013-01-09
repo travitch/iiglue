@@ -141,7 +141,7 @@ dump opts name m = do
       phase1Res = parallelCallGraphSCCTraversal cg phase1Func res0
       -- The transferRes includes (builds on) the phase1Res.  The
       -- transfer analysis depends on finalizers (and maybe escape)
-      transferRes = identifyTransfers funcLikes ds pta phase1Res finalizerSummary transferSummary
+      transferRes = identifyTransfers funcLikes cg ds pta phase1Res finalizerSummary transferSummary
       -- Phase2 depends on the results of the transfer analysis (and
       -- the error analysis)
       phase2 :: [ComposableAnalysis AnalysisSummary FunctionMetadata]
