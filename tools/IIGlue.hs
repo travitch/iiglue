@@ -156,24 +156,6 @@ dump opts name m = do
       diags = mconcat $ extractSummary phase2Res (view diagnosticLens)
       -- Now just take the summaries
       summaries = extractSummary phase2Res ModuleSummary
-  -- let analyses :: [ComposableAnalysis AnalysisSummary FunctionMetadata]
-  --     analyses = [ identifyReturns ds returnSummary
-  --                , identifyScalarEffects scalarEffectSummary
-  --                , identifyArrays ds arraySummary
-  --                , identifyFinalizers ds pta finalizerSummary
-  --                , identifyEscapes ds pta escapeSummary
-  --                , identifyNullable ds nullableSummary returnSummary
-  --                , identifyAllocators ds pta allocatorSummary escapeSummary finalizerSummary
-  --                , identifyOutput ds outputSummary allocatorSummary escapeSummary
-  --                , identifyRefCounting ds refCountSummary finalizerSummary scalarEffectSummary
-  --                ]
-  --     analysisFunction = callGraphComposeAnalysis analyses
-  --     analysisResult =
-  --       parallelCallGraphSCCTraversal cg analysisFunction mempty
-  --     errRes = identifyErrorHandling funcLikes ds pta -- errorHandlingSummary
-  --     analysisResult' = (errorHandlingSummary .~ errRes) analysisResult
-  --     diags = mconcat $ extractSummary analysisResult' (view diagnosticLens)
-  --     summaries = extractSummary analysisResult' ModuleSummary
 
   case formatDiagnostics (diagnosticLevel opts) diags of
     Nothing -> return ()
