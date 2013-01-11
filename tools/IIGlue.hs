@@ -31,6 +31,7 @@ import Foreign.Inference.Analysis.Nullable
 import Foreign.Inference.Analysis.Output
 import Foreign.Inference.Analysis.RefCount
 import Foreign.Inference.Analysis.Return
+import Foreign.Inference.Analysis.SAP
 import Foreign.Inference.Analysis.ScalarEffects
 import Foreign.Inference.Analysis.Transfer
 import Foreign.Inference.Analysis.IndirectCallResolver
@@ -131,6 +132,7 @@ dump opts name m = do
       res0 = (errorHandlingSummary .~ errRes) mempty
       phase1 :: [ComposableAnalysis AnalysisSummary FunctionMetadata]
       phase1 = [ identifyReturns ds returnSummary
+               , identifySAPs ds sapSummary
                , identifyScalarEffects scalarEffectSummary
                , identifyArrays ds arraySummary
                , identifyFinalizers ds pta finalizerSummary
