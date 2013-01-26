@@ -32,6 +32,7 @@ import Foreign.Inference.Analysis.Output
 import Foreign.Inference.Analysis.RefCount
 import Foreign.Inference.Analysis.Return
 import Foreign.Inference.Analysis.SAP
+import Foreign.Inference.Analysis.SAPPTRel
 import Foreign.Inference.Analysis.ScalarEffects
 import Foreign.Inference.Analysis.Transfer
 import Foreign.Inference.Analysis.IndirectCallResolver
@@ -132,10 +133,11 @@ dump opts name m = do
       res0 = (errorHandlingSummary .~ errRes) mempty
       phase1 :: [ComposableAnalysis AnalysisSummary FunctionMetadata]
       phase1 = [ identifyReturns ds returnSummary
-               , identifySAPs ds sapSummary
                , identifyScalarEffects scalarEffectSummary
                , identifyArrays ds arraySummary
                , identifyFinalizers ds pta finalizerSummary
+               , identifySAPPTRels ds sapPTRelSummary
+               , identifySAPs ds sapSummary sapPTRelSummary finalizerSummary
                , identifyEscapes ds pta escapeSummary
                , identifyRefCounting ds refCountSummary finalizerSummary scalarEffectSummary
                ]
@@ -143,7 +145,7 @@ dump opts name m = do
       phase1Res = parallelCallGraphSCCTraversal cg phase1Func res0
       -- The transferRes includes (builds on) the phase1Res.  The
       -- transfer analysis depends on finalizers (and maybe escape)
-      transferRes = identifyTransfers funcLikes cg ds pta phase1Res finalizerSummary transferSummary
+      transferRes = identifyTransfers funcLikes cg ds pta phase1Res finalizerSummary sapSummary transferSummary
       -- Phase2 depends on the results of the transfer analysis (and
       -- the error analysis)
       phase2 :: [ComposableAnalysis AnalysisSummary FunctionMetadata]
