@@ -18,8 +18,11 @@ executable iiglue
   default-language: Haskell2010
   hs-source-dirs: tools
   build-depends: base > 3 && < 5, optparse-applicative >= 0.3.2, filepath,
-                 llvm-analysis, foreign-inference, llvm-data-interop,
-                 archive-inspection, deepseq, lens, deepseq, parallel
+                 deepseq, lens, deepseq, parallel,
+                 llvm-analysis >= 0.1.1,
+                 llvm-data-interop >= 0.1.1,
+                 foreign-inference,
+                 archive-inspection
   main-is: IIGlue.hs
   ghc-options: -Wall -rtsopts -threaded
 
