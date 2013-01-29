@@ -106,7 +106,7 @@ realMain opts = do
         Nothing -> defaultParserOptions { metaPositionPrecision = PositionNone }
         Just _ -> defaultParserOptions
   mm <- buildModule requiredOptimizations (parseLLVMFile parseOpts) (inputFile opts)
-  either error (dump opts name) mm
+  dump opts name mm
 
 dump :: Opts -> String -> Module -> IO ()
 dump opts name m = do
