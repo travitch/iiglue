@@ -105,7 +105,7 @@ realMain opts = do
       parseOpts = case librarySource opts of
         Nothing -> defaultParserOptions { metaPositionPrecision = PositionNone }
         Just _ -> defaultParserOptions
-  mm <- buildModule requiredOptimizations (parseLLVMFile parseOpts) (inputFile opts)
+  mm <- buildModule [] requiredOptimizations (parseLLVMFile parseOpts) (inputFile opts)
   dump opts name mm
 
 dump :: Opts -> String -> Module -> IO ()
