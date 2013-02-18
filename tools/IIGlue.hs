@@ -111,7 +111,7 @@ realMain opts = do
 dump :: Opts -> String -> Module -> IO ()
 dump opts name m = do
   let pta = identifyIndirectCallTargets m
-      cg = mkCallGraph m pta []
+      cg = callGraph m pta []
       deps = inputDependencies opts
       repo = repositoryLocation opts
   baseDeps <- loadDependencies [repo] deps
@@ -133,11 +133,15 @@ dump opts name m = do
       res0 = (errorHandlingSummary .~ errRes) mempty
       phase1 :: [ComposableAnalysis AnalysisSummary FunctionMetadata]
       phase1 = [ identifyReturns ds returnSummary
+                 -- Nullable will depend on the error analysis result
+               , identifyNullable ds nullableSummary returnSummary
                , identifyScalarEffects scalarEffectSummary
                , identifyArrays ds arraySummary
+                 -- Finalizers will depend on nullable so that error
+                 -- paths don't interfere with finalizers
                , identifyFinalizers ds pta finalizerSummary
                , identifySAPPTRels ds sapPTRelSummary
-               , identifySAPs ds sapSummary sapPTRelSummary finalizerSummary
+               , identifySAPs ds pta sapSummary sapPTRelSummary finalizerSummary
                , identifyEscapes ds pta escapeSummary
                , identifyRefCounting ds refCountSummary finalizerSummary scalarEffectSummary
                ]
@@ -151,8 +155,6 @@ dump opts name m = do
       phase2 :: [ComposableAnalysis AnalysisSummary FunctionMetadata]
       phase2 = [ identifyAllocators ds pta allocatorSummary escapeSummary finalizerSummary -- transferSummary
                , identifyOutput ds outputSummary allocatorSummary escapeSummary -- transferSummary
-                 -- Nullable will depend on the error analysis result
-               , identifyNullable ds nullableSummary returnSummary
                ]
       phase2Func = callGraphComposeAnalysis phase2
       phase2Res = parallelCallGraphSCCTraversal cg phase2Func transferRes
