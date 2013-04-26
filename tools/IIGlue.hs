@@ -48,6 +48,7 @@ data Opts = Opts { inputDependencies :: [String]
                  , librarySource :: Maybe FilePath
                  , reportDir :: Maybe FilePath
                  , annotationFile :: Maybe FilePath
+                 , outParamTrivialBranchHack :: Bool
                  , inputFile :: FilePath
                  }
           deriving (Show)
@@ -85,6 +86,9 @@ cmdOpts defaultRepo = Opts
               <> short 'a'
               <> metavar "FILE"
               <> help "An optional file containing annotations for the library being analyzed."))
+          <*> switch
+              ( long "out-param-trivial-branch-hack"
+              <> help "Enable a hack to treat 'if(p) *p = ...;' as an output parameter")
           <*> argument str ( metavar "FILE" )
 
 
@@ -131,6 +135,7 @@ dump opts name m = do
       funcLikes = map fromFunction (moduleDefinedFunctions m)
       errRes = identifyErrorHandling funcLikes ds pta
       res0 = (errorHandlingSummary .~ errRes) mempty
+      outOpts = defaultOutAnalysisConfig { trivialBlockHack = outParamTrivialBranchHack opts }
       phase1 :: [ComposableAnalysis AnalysisSummary FunctionMetadata]
       phase1 = [ identifyReturns ds returnSummary
                  -- Nullable will depend on the error analysis result
@@ -154,7 +159,7 @@ dump opts name m = do
       -- the error analysis)
       phase2 :: [ComposableAnalysis AnalysisSummary FunctionMetadata]
       phase2 = [ identifyAllocators ds pta allocatorSummary escapeSummary finalizerSummary -- transferSummary
-               , identifyOutput ds outputSummary allocatorSummary escapeSummary -- transferSummary
+               , identifyOutput outOpts ds outputSummary allocatorSummary escapeSummary -- transferSummary
                ]
       phase2Func = callGraphComposeAnalysis phase2
       phase2Res = parallelCallGraphSCCTraversal cg phase2Func transferRes
