@@ -159,7 +159,7 @@ dump opts name m = do
       -- the error analysis)
       phase2 :: [ComposableAnalysis AnalysisSummary FunctionMetadata]
       phase2 = [ identifyAllocators ds pta allocatorSummary escapeSummary finalizerSummary -- transferSummary
-               , identifyOutput outOpts ds outputSummary allocatorSummary escapeSummary -- transferSummary
+               , identifyOutput outOpts m ds outputSummary allocatorSummary escapeSummary -- transferSummary
                ]
       phase2Func = callGraphComposeAnalysis phase2
       phase2Res = parallelCallGraphSCCTraversal cg phase2Func transferRes
