@@ -48,7 +48,6 @@ data Opts = Opts { inputDependencies :: [String]
                  , librarySource :: Maybe FilePath
                  , reportDir :: Maybe FilePath
                  , annotationFile :: Maybe FilePath
-                 , outParamTrivialBranchHack :: Bool
                  , inputFile :: FilePath
                  }
           deriving (Show)
@@ -86,9 +85,6 @@ cmdOpts defaultRepo = Opts
               <> short 'a'
               <> metavar "FILE"
               <> help "An optional file containing annotations for the library being analyzed."))
-          <*> switch
-              ( long "out-param-trivial-branch-hack"
-              <> help "Enable a hack to treat 'if(p) *p = ...;' as an output parameter")
           <*> argument str ( metavar "FILE" )
 
 
@@ -125,19 +121,15 @@ dump opts name m = do
       annots <- loadAnnotations af
       return $! addLibraryAnnotations baseDeps annots
 
-  -- FIXME: adapt the parallelCallGraphSCCTraversal to accept a list
-  -- of FuncLikes so that we can share one set among the two global
-  -- passes and the two SCC traversals
-
   -- Have to give a type signature here to fix all of the FuncLike
   -- constraints to our metadata blob.
   let funcLikes :: [FunctionMetadata]
       funcLikes = map fromFunction (moduleDefinedFunctions m)
       errRes = identifyErrorHandling funcLikes ds pta
       res0 = (errorHandlingSummary .~ errRes) mempty
-      outOpts = defaultOutAnalysisConfig { trivialBlockHack = outParamTrivialBranchHack opts }
       phase1 :: [ComposableAnalysis AnalysisSummary FunctionMetadata]
       phase1 = [ identifyReturns ds returnSummary
+               , identifyOutput m ds outputSummary
                  -- Nullable will depend on the error analysis result
                , identifyNullable ds nullableSummary returnSummary
                , identifyScalarEffects scalarEffectSummary
@@ -149,24 +141,17 @@ dump opts name m = do
                , identifySAPs ds pta sapSummary sapPTRelSummary finalizerSummary
                , identifyEscapes ds pta escapeSummary
                , identifyRefCounting ds refCountSummary finalizerSummary scalarEffectSummary
+               , identifyAllocators ds pta allocatorSummary escapeSummary finalizerSummary outputSummary
                ]
       phase1Func = callGraphComposeAnalysis phase1
       phase1Res = parallelCallGraphSCCTraversal cg phase1Func res0
       -- The transferRes includes (builds on) the phase1Res.  The
-      -- transfer analysis depends on finalizers (and maybe escape)
+      -- transfer analysis depends on finalizers and symbolic access paths
       transferRes = identifyTransfers funcLikes cg ds pta phase1Res finalizerSummary sapSummary transferSummary
-      -- Phase2 depends on the results of the transfer analysis (and
-      -- the error analysis)
-      phase2 :: [ComposableAnalysis AnalysisSummary FunctionMetadata]
-      phase2 = [ identifyAllocators ds pta allocatorSummary escapeSummary finalizerSummary -- transferSummary
-               , identifyOutput outOpts m ds outputSummary allocatorSummary escapeSummary -- transferSummary
-               ]
-      phase2Func = callGraphComposeAnalysis phase2
-      phase2Res = parallelCallGraphSCCTraversal cg phase2Func transferRes
       -- Extract the diagnostics from each analysis and combine them
-      diags = mconcat $ extractSummary phase2Res (view diagnosticLens)
+      diags = mconcat $ extractSummary transferRes (view diagnosticLens)
       -- Now just take the summaries
-      summaries = extractSummary phase2Res ModuleSummary
+      summaries = extractSummary transferRes ModuleSummary
 
   case formatDiagnostics (diagnosticLevel opts) diags of
     Nothing -> return ()
