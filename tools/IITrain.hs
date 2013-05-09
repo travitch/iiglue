@@ -1,4 +1,23 @@
 {-# LANGUAGE PatternGuards #-}
+-- | This program trains a SVM to classify functions as either error-reporting
+-- or non-error-reporting.  It then saves the model, which is meant to be
+-- fed to @iiglue@ for use during the error reporting code identification
+-- analysis.
+--
+-- The dependency and repository arguments are the same as for iiglue, and
+-- that data should be shared.  The new input is label information for
+-- the input libraries.  This tool supports multiple libraries as input
+-- so that they can all contribute to training the same model.  The
+-- @labels@ command line argument is the filename of a label map.
+--
+-- A label map is a @Map String (Set String)@ that will be parsed using
+-- 'read'.  The key of the map is the library name (derived from the
+-- file name of the bitcode file for that library).  The mapping from
+-- filename to key should be equivalent to @dropExtensions . takeBaseName@.
+-- libxml2.so.2.7.8.bc becomes libxml2.
+--
+-- The 'Set' of strings contains the names of functions that are used to
+-- report errors in the library.
 module Main ( main ) where
 
 import AI.SVM.Simple
