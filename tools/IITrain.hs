@@ -101,7 +101,8 @@ realMain opts = withFile (labelFile opts) ReadMode $ \h -> do
   let labels = read labelStr
   dataSets <- mapM (buildTrainingData opts labels) (inputFiles opts)
   -- FIXME: Investigate the cost parameter here, along with the gamma for RBF
-  let (msgs, classifier) = trainClassifier (C 1.0) (RBF 1.0) (concat dataSets)
+  let rbfGamma = 1.0 / featureVectorLength
+      (msgs, classifier) = trainClassifier (C 1.0) (RBF rbfGamma) (concat dataSets)
   putStrLn msgs
   save (outputFile opts) classifier
 
