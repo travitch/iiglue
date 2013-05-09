@@ -1,42 +1,29 @@
+{-# LANGUAGE PatternGuards #-}
 module Main ( main ) where
 
 import AI.SVM.Simple
 import Control.Applicative
+import Control.Arrow ( first )
 import Control.Exception ( tryJust )
-import Control.Lens ( (.~), view )
-import Control.Monad ( guard, liftM )
+import Control.Monad ( guard )
+import Data.Map ( Map )
+import qualified Data.Map as M
 import Data.Monoid
-import qualified Data.Traversable as T
+import Data.Set ( Set )
+import qualified Data.Set as S
 import Options.Applicative
 import System.Environment ( getEnv )
 import System.FilePath
+import System.IO
 import System.IO.Error ( isDoesNotExistError )
 
-import Codec.Archive
-
 import LLVM.Analysis
-import LLVM.Analysis.CallGraph
-import LLVM.Analysis.CallGraphSCCTraversal
 import LLVM.Analysis.Util.Testing
 import LLVM.Parse
 
-import Foreign.Inference.Diagnostics
 import Foreign.Inference.Interface
-import Foreign.Inference.Report
 import Foreign.Inference.Preprocessing
-import Foreign.Inference.Analysis.Allocator
-import Foreign.Inference.Analysis.Array
 import Foreign.Inference.Analysis.ErrorHandling
-import Foreign.Inference.Analysis.Escape
-import Foreign.Inference.Analysis.Finalize
-import Foreign.Inference.Analysis.Nullable
-import Foreign.Inference.Analysis.Output
-import Foreign.Inference.Analysis.RefCount
-import Foreign.Inference.Analysis.Return
-import Foreign.Inference.Analysis.SAP
-import Foreign.Inference.Analysis.SAPPTRel
-import Foreign.Inference.Analysis.ScalarEffects
-import Foreign.Inference.Analysis.Transfer
 import Foreign.Inference.Analysis.IndirectCallResolver
 import Foreign.Inference.Analysis.Util.CompositeSummary
 
@@ -46,12 +33,9 @@ import Foreign.Inference.Analysis.Util.CompositeSummary
 -- argument must be specified.
 data Opts = Opts { inputDependencies :: [String]
                  , repositoryLocation :: FilePath
-                 , diagnosticLevel :: Classification
-                 , librarySource :: Maybe FilePath
-                 , reportDir :: Maybe FilePath
-                 , annotationFile :: Maybe FilePath
-                 , errorModelFile :: Maybe FilePath
-                 , inputFile :: FilePath
+                 , labelFile :: FilePath
+                 , outputFile :: FilePath
+                 , inputFiles :: [FilePath]
                  }
           deriving (Show)
 
@@ -68,32 +52,17 @@ cmdOpts defaultRepo = Opts
               <> metavar "DIRECTORY"
               <> value defaultRepo
               <> help "The directory containing dependency summaries.  The summary of the input library will be stored here. (Default: consult environment)")
-          <*> option
-              ( long "diagnostics"
-              <> metavar "DIAGNOSTIC"
-              <> value Warning
-              <> help "The level of diagnostics to show (Debug, Info, Warning, Error).  Default: Warning" )
-          <*> optional (strOption
-              ( long "source"
-              <> short 's'
+          <*> strOption
+              ( long "labels"
+              <> short 'l'
               <> metavar "FILE"
-              <> help "The source for the library being analyzed (tarball or zip archive).  If provided, a report will be generated"))
-          <*> optional (strOption
-              ( long "reportDir"
-              <> short 'p'
-              <> metavar "DIRECTORY"
-              <> help "The directory in which the summary report will be produced.  Defaults to the REPOSITORY."))
-          <*> optional (strOption
-              ( long "annotations"
-              <> short 'a'
+              <> help "A file containing labels noting the error functions for input libraries" )
+          <*> strOption
+              ( long "output"
+              <> short 'o'
               <> metavar "FILE"
-              <> help "An optional file containing annotations for the library being analyzed."))
-          <*> optional (strOption
-              ( long "errorModel"
-              <> short 'e'
-              <> metavar "FILE"
-              <> help "A trained SVM model for classifying error-reporting functions.  If this is provided, the SVM classifier will be used." ))
-          <*> argument str ( metavar "FILE" )
+              <> help "The file in which the generated model will be stored" )
+          <*> some (argument str ( metavar "INFILE" ))
 
 
 main :: IO ()
@@ -102,19 +71,52 @@ main = do
   let repLoc = either (error "No dependency repository specified") id mRepLoc
       args = info (helper <*> cmdOpts repLoc)
         ( fullDesc
-        <> progDesc "Infer interface annotations for FILE (which can be bitcode or llvm assembly)"
-        <> header "iiglue - A frontend for the FFI Inference engine")
+        <> progDesc "Train an SVM classifier for error reporting functions"
+        <> header "iitrain - A helper to train an SVM for iiglue")
 
   execParser args >>= realMain
 
 realMain :: Opts -> IO ()
-realMain opts = do
-  let name = takeBaseName (inputFile opts)
-      parseOpts = case librarySource opts of
-        Nothing -> defaultParserOptions { metaPositionPrecision = PositionNone }
-        Just _ -> defaultParserOptions
-  mm <- buildModule [] requiredOptimizations (parseLLVMFile parseOpts) (inputFile opts)
-  dump opts name mm
+realMain opts = withFile (labelFile opts) ReadMode $ \h -> do
+  labelStr <- hGetContents h
+  let labels = read labelStr
+  dataSets <- mapM (buildTrainingData opts labels) (inputFiles opts)
+  -- FIXME: Investigate the cost parameter here, along with the gamma for RBF
+  let (msgs, classifier) = trainClassifier (C 1.0) (RBF 1.0) (concat dataSets)
+  putStrLn msgs
+  save (outputFile opts) classifier
+
+buildTrainingData :: Opts -> Map FilePath (Set String)
+                  -> FilePath
+                  -> IO [(ErrorFuncClass, FeatureVector)]
+buildTrainingData opts allLabels fname = do
+  let libName = dropExtensions $ takeBaseName fname
+      Just labels = M.lookup libName allLabels
+      parseOpts = defaultParserOptions { metaPositionPrecision = PositionNone }
+  m <- buildModule [] requiredOptimizations (parseLLVMFile parseOpts) fname
+  let pta = identifyIndirectCallTargets m
+      deps = inputDependencies opts
+      repo = repositoryLocation opts
+  ds <- loadDependencies [repo] deps
+  let funcLikes :: [FunctionMetadata]
+      funcLikes = map fromFunction (moduleDefinedFunctions m)
+      trainingData = errorHandlingTrainingData funcLikes ds pta
+  return $ fmap (first (valueToLabel labels)) trainingData
+
+valueToLabel :: Set String -> Value -> ErrorFuncClass
+valueToLabel labels val
+  | Just funcName <- valToFuncName val
+  , S.member funcName labels = ErrorReporter
+  | otherwise = OtherFunction
+
+valToFuncName :: Value -> Maybe String
+valToFuncName val =
+  case valueContent' val of
+    ExternalFunctionC ef -> return $ identifierAsString (externalFunctionName ef)
+    FunctionC f -> return $ identifierAsString (functionName f)
+    _ -> fail "Not a function"
+
+{-
 
 dump :: Opts -> String -> Module -> IO ()
 dump opts name m = do
@@ -129,13 +131,11 @@ dump opts name m = do
       annots <- loadAnnotations af
       return $! addLibraryAnnotations baseDeps annots
 
-  classifier <- T.mapM makeClassifier (errorModelFile opts)
-
   -- Have to give a type signature here to fix all of the FuncLike
   -- constraints to our metadata blob.
   let funcLikes :: [FunctionMetadata]
       funcLikes = map fromFunction (moduleDefinedFunctions m)
-      errRes = identifyErrorHandling funcLikes ds pta classifier
+      errRes = identifyErrorHandling funcLikes ds pta
       res0 = (errorHandlingSummary .~ errRes) mempty
       phase1 :: [ComposableAnalysis AnalysisSummary FunctionMetadata]
       phase1 = [ identifyReturns ds returnSummary
@@ -174,9 +174,6 @@ dump opts name m = do
     (Just d, Nothing) -> writeSummary m summaries ds d
     (Just d, Just archive) -> writeDetailedReport m summaries ds d archive
 
-makeClassifier :: FilePath -> IO (FeatureVector -> ErrorFuncClass)
-makeClassifier = liftM classify . load
-
 writeSummary :: Module -> [ModuleSummary] -> DependencySummary -> FilePath -> IO ()
 writeSummary m summaries ds rDir = do
   let rep = compileSummaryReport m summaries ds
@@ -190,3 +187,4 @@ writeDetailedReport m summaries ds rDir fp = do
   arc <- readArchive fp
   let rep = compileDetailedReport m arc summaries ds
   writeHTMLReport rep rDir
+  -}
