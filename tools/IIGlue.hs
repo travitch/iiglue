@@ -6,7 +6,6 @@ import Control.Exception ( tryJust )
 import Control.Lens ( (.~), view )
 import Control.Monad ( guard, liftM )
 import Data.Monoid
-import qualified Data.Traversable as T
 import Options.Applicative
 import System.Environment ( getEnv )
 import System.FilePath
@@ -51,6 +50,7 @@ data Opts = Opts { inputDependencies :: [String]
                  , reportDir :: Maybe FilePath
                  , annotationFile :: Maybe FilePath
                  , errorModelFile :: Maybe FilePath
+                 , noErrorLearning :: Bool
                  , inputFile :: FilePath
                  }
           deriving (Show)
@@ -93,6 +93,9 @@ cmdOpts defaultRepo = Opts
               <> short 'e'
               <> metavar "FILE"
               <> help "A trained SVM model for classifying error-reporting functions.  If this is provided, the SVM classifier will be used." ))
+          <*> switch
+              ( long "noErrorLearning"
+              <> help "Disable error reporting function learning entirely.  This flag overrides a specified classifier." )
           <*> argument str ( metavar "FILE" )
 
 
@@ -129,7 +132,10 @@ dump opts name m = do
       annots <- loadAnnotations af
       return $! addLibraryAnnotations baseDeps annots
 
-  classifier <- T.mapM makeClassifier (errorModelFile opts)
+  classifier <- case (errorModelFile opts, noErrorLearning opts) of
+    (_, True) -> return NoClassifier
+    (Just emf, False) -> liftM (FeatureClassifier . classify) (load emf)
+    (Nothing, False) -> return DefaultClassifier
 
   -- Have to give a type signature here to fix all of the FuncLike
   -- constraints to our metadata blob.
@@ -173,9 +179,6 @@ dump opts name m = do
     (Nothing, _) -> return ()
     (Just d, Nothing) -> writeSummary m summaries ds d
     (Just d, Just archive) -> writeDetailedReport m summaries ds d archive
-
-makeClassifier :: FilePath -> IO (FeatureVector -> ErrorFuncClass)
-makeClassifier = liftM classify . load
 
 writeSummary :: Module -> [ModuleSummary] -> DependencySummary -> FilePath -> IO ()
 writeSummary m summaries ds rDir = do
