@@ -51,6 +51,7 @@ data Opts = Opts { inputDependencies :: [String]
                  , annotationFile :: Maybe FilePath
                  , errorModelFile :: Maybe FilePath
                  , noErrorLearning :: Bool
+                 , noGeneralizeErrorCodes :: Bool
                  , inputFile :: FilePath
                  }
           deriving (Show)
@@ -96,6 +97,9 @@ cmdOpts defaultRepo = Opts
           <*> switch
               ( long "noErrorLearning"
               <> help "Disable error reporting function learning entirely.  This flag overrides a specified classifier." )
+          <*> switch
+              ( long "noGeneralizeErrorCodes"
+              <> help "Do not use known error codes to flag other blocks returning the same value as reporting errors." )
           <*> argument str ( metavar "FILE" )
 
 
@@ -141,7 +145,10 @@ dump opts name m = do
   -- constraints to our metadata blob.
   let funcLikes :: [FunctionMetadata]
       funcLikes = map fromFunction (moduleDefinedFunctions m)
-      errRes = identifyErrorHandling funcLikes ds pta classifier
+      errCfg = defaultErrorAnalysisOptions { errorClassifier = classifier
+                                           , generalizeFromReturns = not (noGeneralizeErrorCodes opts)
+                                           }
+      errRes = identifyErrorHandling funcLikes ds pta errCfg
       res0 = (errorHandlingSummary .~ errRes) mempty
       phase1 :: [ComposableAnalysis AnalysisSummary FunctionMetadata]
       phase1 = [ identifyReturns ds returnSummary
