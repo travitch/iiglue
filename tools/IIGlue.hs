@@ -1,10 +1,12 @@
 module Main ( main ) where
 
 import AI.SVM.Simple
+import Control.Arrow ( first )
 import Control.Applicative
 import Control.Exception ( tryJust )
 import Control.Lens ( (.~), view )
 import Control.Monad ( guard, liftM )
+import qualified Data.Foldable as F
 import Data.Monoid
 import Options.Applicative
 import System.Environment ( getEnv )
@@ -52,6 +54,7 @@ data Opts = Opts { inputDependencies :: [String]
                  , errorModelFile :: Maybe FilePath
                  , noErrorLearning :: Bool
                  , noGeneralizeErrorCodes :: Bool
+                 , dumpErrorFeatures :: Maybe FilePath
                  , inputFile :: FilePath
                  }
           deriving (Show)
@@ -100,6 +103,10 @@ cmdOpts defaultRepo = Opts
           <*> switch
               ( long "disable-rc-generalization"
               <> help "Do not use known error codes to flag other blocks returning the same value as reporting errors." )
+          <*> optional (strOption
+              ( long "dump-error-features"
+              <> metavar "FILE"
+              <> help "Dump error function classification feature vectors for each function in the library into the given file."))
           <*> argument str ( metavar "FILE" )
 
 
@@ -175,6 +182,11 @@ dump opts name m = do
       diags = mconcat $ extractSummary transferRes (view diagnosticLens)
       -- Now just take the summaries
       summaries = extractSummary transferRes ModuleSummary
+
+  F.for_ (dumpErrorFeatures opts) $ \errDump -> do
+    let errDat = errorHandlingTrainingData funcLikes ds pta
+        showDat = map (first (fmap identifierAsString . valueName)) errDat
+    writeFile errDump (show showDat)
 
   case formatDiagnostics (diagnosticLevel opts) diags of
     Nothing -> return ()
