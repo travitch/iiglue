@@ -1,13 +1,21 @@
 module Main ( main ) where
 
 import AI.SVM.Simple
-import Control.Arrow ( first )
 import Control.Applicative
 import Control.Exception ( tryJust )
 import Control.Lens ( (.~), view )
 import Control.Monad ( guard, liftM )
+import qualified Data.ByteString.Lazy as LBS
+import qualified Data.Csv as CSV
 import qualified Data.Foldable as F
+import Data.Maybe ( mapMaybe )
 import Data.Monoid
+import qualified Data.Text.Lazy as LText
+import qualified Data.Text.Lazy.Builder as LText
+import qualified Data.Text.Lazy.Builder.RealFloat as LText
+import qualified Data.Text.Lazy.Encoding as LText
+import qualified Data.Vector as V
+import qualified Data.Vector.Unboxed as UV
 import Options.Applicative
 import System.Environment ( getEnv )
 import System.FilePath
@@ -183,10 +191,12 @@ dump opts name m = do
       -- Now just take the summaries
       summaries = extractSummary transferRes ModuleSummary
 
-  F.for_ (dumpErrorFeatures opts) $ \errDump -> do
-    let errDat = errorHandlingTrainingData funcLikes ds pta
-        showDat = map (first (fmap identifierAsString . valueName)) errDat
-    writeFile errDump (show showDat)
+  let errDat = errorHandlingTrainingData funcLikes ds pta
+  F.for_ (dumpErrorFeatures opts) (dumpCSV errDat)
+  -- $ \errDump -> do
+  --   let errDat = errorHandlingTrainingData funcLikes ds pta
+  --       showDat = map (first (fmap identifierAsString . valueName)) errDat
+  --   writeFile errDump (show showDat)
 
   case formatDiagnostics (diagnosticLevel opts) diags of
     Nothing -> return ()
@@ -198,6 +208,16 @@ dump opts name m = do
     (Nothing, _) -> return ()
     (Just d, Nothing) -> writeSummary m summaries ds d
     (Just d, Just archive) -> writeDetailedReport m summaries ds d archive
+
+dumpCSV :: [(Value, UV.Vector Double)] -> FilePath -> IO ()
+dumpCSV dat file = LBS.writeFile file (CSV.encode dat')
+  where
+    dat' = V.fromList $ mapMaybe prettyName dat
+    dblToTxt = LText.encodeUtf8 . LText.toLazyText . LText.realFloat
+    prettyName (v, row) = do
+      ident <- valueName v
+      let bs = LText.encodeUtf8 $ LText.fromChunks [identifierContent ident]
+      return $ bs : map dblToTxt (UV.toList row)
 
 writeSummary :: Module -> [ModuleSummary] -> DependencySummary -> FilePath -> IO ()
 writeSummary m summaries ds rDir = do

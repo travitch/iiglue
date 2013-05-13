@@ -23,6 +23,9 @@ executable iiglue
                  llvm-data-interop >= 0.2.0,
                  foreign-inference >= 0.2.0,
                  svm-simple >= 0.2.7.2,
+                 cassava >= 0.2,
+                 vector >= 0.10,
+                 bytestring, text,
                  filepath, deepseq, lens, deepseq, parallel,
                  archive-inspection
   main-is: IIGlue.hs
