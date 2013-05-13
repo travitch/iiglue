@@ -193,10 +193,6 @@ dump opts name m = do
 
   let errDat = errorHandlingTrainingData funcLikes ds pta
   F.for_ (dumpErrorFeatures opts) (dumpCSV errDat)
-  -- $ \errDump -> do
-  --   let errDat = errorHandlingTrainingData funcLikes ds pta
-  --       showDat = map (first (fmap identifierAsString . valueName)) errDat
-  --   writeFile errDump (show showDat)
 
   case formatDiagnostics (diagnosticLevel opts) diags of
     Nothing -> return ()
