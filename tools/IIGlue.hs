@@ -80,7 +80,7 @@ cmdOpts defaultRepo = Opts
               <> metavar "FILE"
               <> help "The source for the library being analyzed (tarball or zip archive).  If provided, a report will be generated"))
           <*> optional (strOption
-              ( long "reportDir"
+              ( long "report-dir"
               <> short 'p'
               <> metavar "DIRECTORY"
               <> help "The directory in which the summary report will be produced.  Defaults to the REPOSITORY."))
@@ -90,15 +90,15 @@ cmdOpts defaultRepo = Opts
               <> metavar "FILE"
               <> help "An optional file containing annotations for the library being analyzed."))
           <*> optional (strOption
-              ( long "errorModel"
+              ( long "svm-error-model"
               <> short 'e'
               <> metavar "FILE"
               <> help "A trained SVM model for classifying error-reporting functions.  If this is provided, the SVM classifier will be used." ))
           <*> switch
-              ( long "noErrorLearning"
+              ( long "disable-func-generalization"
               <> help "Disable error reporting function learning entirely.  This flag overrides a specified classifier." )
           <*> switch
-              ( long "noGeneralizeErrorCodes"
+              ( long "disable-rc-generalization"
               <> help "Do not use known error codes to flag other blocks returning the same value as reporting errors." )
           <*> argument str ( metavar "FILE" )
 
