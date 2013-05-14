@@ -149,7 +149,7 @@ dump opts name m = do
     Nothing -> return baseDeps
     Just af -> do
       annots <- loadAnnotations af
-      return $! addLibraryAnnotations baseDeps annots
+      return $! addManualAnnotations baseDeps annots
 
   classifier <- case (errorModelFile opts, noErrorLearning opts) of
     (_, True) -> return NoClassifier
