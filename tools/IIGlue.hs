@@ -26,6 +26,7 @@ import Codec.Archive
 import LLVM.Analysis
 import LLVM.Analysis.CallGraph
 import LLVM.Analysis.CallGraphSCCTraversal
+import LLVM.Analysis.UsesOf
 import LLVM.Analysis.Util.Testing
 import LLVM.Parse
 
@@ -160,10 +161,11 @@ dump opts name m = do
   -- constraints to our metadata blob.
   let funcLikes :: [FunctionMetadata]
       funcLikes = map fromFunction (moduleDefinedFunctions m)
+      uses = computeUsesOf m
       errCfg = defaultErrorAnalysisOptions { errorClassifier = classifier
                                            , generalizeFromReturns = not (noGeneralizeErrorCodes opts)
                                            }
-      errRes = identifyErrorHandling funcLikes ds pta errCfg
+      errRes = identifyErrorHandling funcLikes ds uses pta errCfg
       res0 = (errorHandlingSummary .~ errRes) mempty
       phase1 :: [ComposableAnalysis AnalysisSummary FunctionMetadata]
       phase1 = [ identifyReturns ds returnSummary
@@ -191,7 +193,7 @@ dump opts name m = do
       -- Now just take the summaries
       summaries = extractSummary transferRes ModuleSummary
 
-  let errDat = errorHandlingTrainingData funcLikes ds pta
+  let errDat = errorHandlingTrainingData funcLikes ds uses pta
   F.for_ (dumpErrorFeatures opts) (dumpCSV errDat)
 
   case formatDiagnostics (diagnosticLevel opts) diags of

@@ -37,6 +37,7 @@ import System.IO
 import System.IO.Error ( isDoesNotExistError )
 
 import LLVM.Analysis
+import LLVM.Analysis.UsesOf
 import LLVM.Analysis.Util.Testing
 import LLVM.Parse
 
@@ -45,6 +46,9 @@ import Foreign.Inference.Preprocessing
 import Foreign.Inference.Analysis.ErrorHandling
 import Foreign.Inference.Analysis.IndirectCallResolver
 import Foreign.Inference.Analysis.Util.CompositeSummary
+
+import Debug.Trace
+debug = flip trace
 
 -- | The repository location is first chosen based on an environment
 -- variable.  The command line argument, if specified, will override
@@ -102,7 +106,7 @@ realMain opts = withFile (labelFile opts) ReadMode $ \h -> do
   dataSets <- mapM (buildTrainingData opts labels) (inputFiles opts)
   -- FIXME: Investigate the cost parameter here, along with the gamma for RBF
   let rbfGamma = 1.0 / featureVectorLength
-      (msgs, classifier) = trainClassifier (C 1.0) (RBF rbfGamma) (concat dataSets)
+      (msgs, classifier) = trainClassifier (C 5.0) Linear (concat dataSets)
   putStrLn msgs
   save (outputFile opts) classifier
 
@@ -115,18 +119,19 @@ buildTrainingData opts allLabels fname = do
       parseOpts = defaultParserOptions { metaPositionPrecision = PositionNone }
   m <- buildModule [] requiredOptimizations (parseLLVMFile parseOpts) fname
   let pta = identifyIndirectCallTargets m
+      uses = computeUsesOf m
       deps = inputDependencies opts
       repo = repositoryLocation opts
   ds <- loadDependencies [repo] deps
   let funcLikes :: [FunctionMetadata]
       funcLikes = map fromFunction (moduleDefinedFunctions m)
-      trainingData = errorHandlingTrainingData funcLikes ds pta
+      trainingData = errorHandlingTrainingData funcLikes ds uses pta
   return $ fmap (first (valueToLabel labels)) trainingData
 
 valueToLabel :: Set String -> Value -> ErrorFuncClass
 valueToLabel labels val
   | Just funcName <- valToFuncName val
-  , S.member funcName labels = ErrorReporter
+  , S.member funcName labels = ErrorReporter `debug` ("Labeled " ++ funcName)
   | otherwise = OtherFunction
 
 valToFuncName :: Value -> Maybe String
