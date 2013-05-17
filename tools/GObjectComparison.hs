@@ -1,12 +1,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Main ( main ) where
 
-import Control.Monad.RWS
+import Control.Monad ( when, unless )
+import Control.Monad.Trans.RWS
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Foldable as F
 import Data.Map ( Map )
 import qualified Data.Map as M
 import Data.Maybe ( mapMaybe )
+import Data.Monoid
 import Data.Sequence ( Seq )
 import qualified Data.Sequence as Seq
 import Data.Set ( Set )

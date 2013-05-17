@@ -91,6 +91,6 @@ executable gobject-comparison
   build-depends: base == 4.*,
                  foreign-inference >= 0.2.0,
                  optparse-applicative >= 0.3.2,
-                 xml-conduit,text, containers, bytestring, mtl
+                 xml-conduit, text, containers, bytestring, transformers
   main-is: GObjectComparison.hs
   ghc-options: -Wall -rtsopts
