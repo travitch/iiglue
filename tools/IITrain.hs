@@ -125,7 +125,7 @@ buildTrainingData opts allLabels fname = do
   ds <- loadDependencies [repo] deps
   let funcLikes :: [FunctionMetadata]
       funcLikes = map fromFunction (moduleDefinedFunctions m)
-      trainingData = errorHandlingTrainingData funcLikes ds uses pta
+      trainingData = errorHandlingTrainingData funcLikes ds uses pta defaultErrorAnalysisOptions
   return $ fmap (first (valueToLabel labels)) trainingData
 
 valueToLabel :: Set String -> Value -> ErrorFuncClass

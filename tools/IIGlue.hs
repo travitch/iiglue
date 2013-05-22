@@ -64,6 +64,7 @@ data Opts = Opts { inputDependencies :: [String]
                  , noErrorLearning :: Bool
                  , noGeneralizeErrorCodes :: Bool
                  , dumpErrorFeatures :: Maybe FilePath
+                 , noLearnRCZero :: Bool
                  , inputFile :: FilePath
                  }
           deriving (Show)
@@ -116,6 +117,9 @@ cmdOpts defaultRepo = Opts
               ( long "dump-error-features"
               <> metavar "FILE"
               <> help "Dump error function classification feature vectors for each function in the library into the given file."))
+          <*> switch
+              ( long "disable-learn-rc-zero"
+              <> help "Never learn the value 0 as an error code.")
           <*> argument str ( metavar "FILE" )
 
 
@@ -164,6 +168,7 @@ dump opts name m = do
       uses = computeUsesOf m
       errCfg = defaultErrorAnalysisOptions { errorClassifier = classifier
                                            , generalizeFromReturns = not (noGeneralizeErrorCodes opts)
+                                           , prohibitLearnZero = noLearnRCZero opts
                                            }
       errRes = identifyErrorHandling funcLikes ds uses pta errCfg
       res0 = (errorHandlingSummary .~ errRes) mempty
@@ -193,7 +198,7 @@ dump opts name m = do
       -- Now just take the summaries
       summaries = extractSummary transferRes ModuleSummary
 
-  let errDat = errorHandlingTrainingData funcLikes ds uses pta
+  let errDat = errorHandlingTrainingData funcLikes ds uses pta errCfg
   F.for_ (dumpErrorFeatures opts) (dumpCSV errDat)
 
   case formatDiagnostics (diagnosticLevel opts) diags of
