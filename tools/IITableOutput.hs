@@ -11,12 +11,19 @@ import Text.LaTeX.Base as Tex
 
 import Foreign.Inference.Interface
 
-data Opts = Opts { interfaceFiles :: [FilePath]
+data Opts = Opts { destRoot :: FilePath
+                 , interfaceFiles :: [FilePath]
                  }
           deriving (Show)
 
 cmdOpts :: Parser Opts
-cmdOpts = Opts <$> arguments str ( metavar "FILE" )
+cmdOpts =  Opts
+  <$> strOption
+      ( long "root"
+      <> short 'r'
+      <> metavar "DIR"
+      <> help "The root directory in which generated tables will be placed")
+  <*> arguments str ( metavar "FILE" )
 
 main :: IO ()
 main = execParser args >>= realMain
@@ -29,12 +36,16 @@ main = execParser args >>= realMain
 realMain :: Opts -> IO ()
 realMain opts = do
   interfaces <- mapM readLibraryInterface (interfaceFiles opts)
-  let t = renderPointerStatsTable interfaces
-  T.putStrLn (Tex.render t)
+  let pt = renderPointerStatsTable interfaces
+      mt = renderMemoryStatsTable interfaces
+  T.writeFile (destRoot opts </> "pointers/big-table.tex") (Tex.render pt)
+  T.writeFile (destRoot opts </> "memory/big-table.tex") (Tex.render mt)
 
 renderPointerStatsTable :: [LibraryInterface] -> LaTeX
 renderPointerStatsTable ifaces =
-  mconcat (map pointerSummaryToRow pointerSummaries) <> {-avgs <>-} totals
+  mconcat (map pointerSummaryToRow pointerSummaries)
+    <> (raw "\\midrule" %: "")
+    <> totals
   where
     pointerSummaries = map toPointerSummary ifaces
     totals = textbf (texy ("Total" :: Text))
@@ -48,6 +59,28 @@ renderPointerStatsTable ifaces =
                & texy (hmean (map psPercentAnnot pointerSummaries))
                <> lnbk %: ""
 
+renderMemoryStatsTable :: [LibraryInterface] -> LaTeX
+renderMemoryStatsTable ifaces =
+  mconcat (map memorySummaryToRow memorySummaries)
+    <> (raw "\\midrule" %: "")
+    <> totals
+  where
+    memorySummaries = map toMemorySummary ifaces
+    totals = textbf (texy ("Total" :: Text))
+      & summField msNumFuncs memorySummaries
+      & summField msNumAllocators memorySummaries
+      & summField msNumFinalizers memorySummaries
+      <> lnbk %: ""
+
+memorySummaryToRow :: MemorySummary -> LaTeX
+memorySummaryToRow ms =
+  texy (msLibraryName ms)
+    & texy (msNumFuncs ms)
+    & texy (msNumAllocators ms)
+    & texy (msNumFinalizers ms)
+    <> lnbk %: ""
+
+-- | Harmonic mean of a list of ints
 hmean :: [Int] -> Int
 hmean ns = round $ realN / sum recips
   where
@@ -71,6 +104,30 @@ pointerSummaryToRow ps =
     texy (psArrayParams ps) &
     texy (psPercentAnnot ps) <>
     lnbk %: psLibraryName ps
+
+data MemorySummary =
+  MemorySummary { msLibraryName :: Text
+                , msNumFuncs :: Int
+                , msNumAllocators :: Int
+                , msNumFinalizers :: Int
+                }
+  deriving (Eq, Ord, Show)
+
+toMemorySummary :: LibraryInterface -> MemorySummary
+toMemorySummary i =
+  MemorySummary { msLibraryName = T.pack $ dropExtensions $ libraryName i
+                , msNumFuncs = nFuncs
+                , msNumFinalizers = countIf (paramHasAnnot (==PAFinalize)) ps
+                , msNumAllocators = countIf (funcIs isAlloc) fs
+                }
+  where
+    nFuncs = length fs
+    fs = libraryFunctions i
+    ps = concatMap foreignFunctionParameters fs
+
+isAlloc :: FuncAnnotation -> Bool
+isAlloc (FAAllocator _) = True
+isAlloc _ = False
 
 data PointerSummary =
   PointerSummary { psLibraryName :: Text
@@ -124,121 +181,6 @@ paramHasAnnot p = any p . parameterAnnotations
 funcHasAnnot :: (ParamAnnotation -> Bool) -> ForeignFunction -> Bool
 funcHasAnnot p = or . map (paramHasAnnot p) . foreignFunctionParameters
 
-{-
+funcIs :: (FuncAnnotation -> Bool) -> ForeignFunction -> Bool
+funcIs p = or . map p . foreignFunctionAnnotations
 
-renderStatsHTML :: [InterfaceStats] -> Html
-renderStatsHTML stats = H.docTypeHtml $ do
-  H.head $ do
-    H.title "Aggregate Stats"
-  H.body $ do
-    mapM_ renderStatsTable stats
-    renderStatsTable (mconcat stats)
-    H.p $ do
-      stringToHtml "Annotated Percent List = "
-      toHtml (show pctList)
-  where
-    pctList = map annotatedFunctionPercent stats
-
-
-renderStatsTable :: InterfaceStats -> Html
-renderStatsTable stats = do
-  H.h1 (toHtml (statsForLibrary stats))
-  H.table $ do
-    H.tr $ do
-      H.td "Total Functions"
-      H.td $ toHtml $ show $ statsTotalFunctions stats
-    H.tr $ do
-      H.td "Functions With Annotations"
-      H.td $ toHtml $ show $ length (statsAnnotatedFunctions stats)
-    H.tr $ do
-      H.td "Total Annotations"
-      H.td $ toHtml $ show $ statsTotalAnnotations stats
-    H.tr $ do
-      H.td "Percent With Annotations"
-      H.td $ toHtml $ show $ annotatedFunctionPercent stats
-    forM_ (M.toList (statsPerFuncAnnotation stats)) $ \(annot, lst) -> do
-      H.tr $ do
-        H.td $ toHtml (show annot)
-        H.td $ toHtml $ show (length lst)
-    forM_ (M.toList (statsPerParamAnnotation stats)) $ \(annot, lst) -> do
-      H.tr $ do
-        H.td $ toHtml (show annot)
-        H.td $ toHtml $ show (length lst)
-
-annotatedFunctionPercent :: InterfaceStats -> Double
-annotatedFunctionPercent stats = annotLen / totalFuncs
-  where
-    annotLen :: Double
-    annotLen = fromInteger $ toInteger $ length (statsAnnotatedFunctions stats)
-    totalFuncs :: Double
-    totalFuncs = fromInteger $ toInteger $ statsTotalFunctions stats
-
-data InterfaceStats =
-  InterfaceStats { statsForLibrary :: String
-                 , statsTotalFunctions :: Int
-                 , statsAnnotatedFunctions :: [ForeignFunction]
-                 , statsPerParamAnnotation :: Map ParamAnnotation [Parameter]
-                 , statsPerFuncAnnotation :: Map FuncAnnotation [ForeignFunction]
-                 }
-
--- | Combine interface stats in a sane way.  The maps are updated with
--- unions.
-instance Monoid InterfaceStats where
-  mempty = InterfaceStats mempty 0 mempty mempty mempty
-  mappend is1 is2 =
-    InterfaceStats { statsForLibrary = "aggregate"
-                   , statsTotalFunctions = statsTotalFunctions is1 + statsTotalFunctions is2
-                   , statsAnnotatedFunctions = statsAnnotatedFunctions is1 ++ statsAnnotatedFunctions is2
-                   , statsPerParamAnnotation = M.unionWith (++) (statsPerParamAnnotation is1) (statsPerParamAnnotation is2)
-                   , statsPerFuncAnnotation = M.unionWith (++) (statsPerFuncAnnotation is1) (statsPerFuncAnnotation is2)
-                   }
-
-interfaceStats :: [ParamAnnotation] -> LibraryInterface -> InterfaceStats
-interfaceStats ignored libIface =
-  InterfaceStats { statsForLibrary = libraryName libIface
-                 , statsTotalFunctions = length funcs
-                 , statsAnnotatedFunctions = filter (funcHasAnnotation ignored) funcs
-                 , statsPerParamAnnotation = foldr (collectParamAnnotations ignored) mempty params
-                 , statsPerFuncAnnotation = foldr collectFuncAnnotations mempty funcs
-                 }
-  where
-    params = concatMap foreignFunctionParameters funcs
-    funcs = libraryFunctions libIface
-
-statsTotalAnnotations :: InterfaceStats -> Int
-statsTotalAnnotations is =
-  length (concat (M.elems (statsPerParamAnnotation is))) +
-    length (concat (M.elems (statsPerFuncAnnotation is)))
-
-collectFuncAnnotations :: ForeignFunction
-                          -> Map FuncAnnotation [ForeignFunction]
-                          -> Map FuncAnnotation [ForeignFunction]
-collectFuncAnnotations ff acc =
-  foldr go acc (foreignFunctionAnnotations ff)
-  where
-    go annot = M.insertWith' (++) annot [ff]
-
-collectParamAnnotations :: [ParamAnnotation]
-                           -> Parameter
-                           -> Map ParamAnnotation [Parameter]
-                           -> Map ParamAnnotation [Parameter]
-collectParamAnnotations ignored p acc =
-  foldr go acc (parameterAnnotations p)
-  where
-    go annot m =
-      case annot `elem` ignored of
-        False -> M.insertWith' (++) annot [p] m
-        True -> m
-
-funcHasAnnotation :: [ParamAnnotation] -> ForeignFunction -> Bool
-funcHasAnnotation ignored ff =
-  not (null fannots) || any hasParamAnnotations params
-  where
-    fannots = foreignFunctionAnnotations ff
-    params = foreignFunctionParameters ff
-    hasParamAnnotations = not . null . filter notIgnored . parameterAnnotations
-    notIgnored = not . (`elem` ignored)
-
-stringToHtml :: String -> Html
-stringToHtml = toHtml
--}
