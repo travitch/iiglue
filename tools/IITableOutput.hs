@@ -36,10 +36,34 @@ main = execParser args >>= realMain
 realMain :: Opts -> IO ()
 realMain opts = do
   interfaces <- mapM readLibraryInterface (interfaceFiles opts)
-  let pt = renderPointerStatsTable interfaces
-      mt = renderMemoryStatsTable interfaces
-  T.writeFile (destRoot opts </> "pointers/big-table.tex") (Tex.render pt)
+  let mt = renderMemoryStatsTable interfaces
+      pt = renderPointerStatsTable interfaces
+      ot = renderOutStatsTable interfaces
+      at = renderArrayStatsTable interfaces
+      nt = renderNullStatsTable interfaces
+  T.writeFile (destRoot opts </> "pointers/overall-table.tex") (Tex.render pt)
+  T.writeFile (destRoot opts </> "pointers/null-table.tex") (Tex.render nt)
+  T.writeFile (destRoot opts </> "pointers/out-table.tex") (Tex.render ot)
+  T.writeFile (destRoot opts </> "pointers/array-table.tex") (Tex.render at)
   T.writeFile (destRoot opts </> "memory/big-table.tex") (Tex.render mt)
+
+-- renderPointerStatsTable :: [LibraryInterface] -> LaTeX
+-- renderPointerStatsTable ifaces =
+--   mconcat (map pointerSummaryToRow pointerSummaries)
+--     <> (raw "\\midrule" %: "")
+--     <> totals
+--   where
+--     pointerSummaries = map toPointerSummary ifaces
+--     totals = textbf (texy ("Total" :: Text))
+--                & summField psNumFuncs pointerSummaries
+--                & summField psOutFuncs pointerSummaries
+--                & summField psOutParams pointerSummaries
+--                & summField psInOutFuncs pointerSummaries
+--                & summField psInOutParams pointerSummaries
+--                & summField psArrayFuncs pointerSummaries
+--                & summField psArrayParams pointerSummaries
+--                & texy (hmean (map psPercentAnnot pointerSummaries))
+--                <> lnbk %: ""
 
 renderPointerStatsTable :: [LibraryInterface] -> LaTeX
 renderPointerStatsTable ifaces =
@@ -47,6 +71,34 @@ renderPointerStatsTable ifaces =
     <> (raw "\\midrule" %: "")
     <> totals
   where
+    pointerSummaryToRow :: PointerSummary -> LaTeX
+    pointerSummaryToRow ps =
+      texy (psLibraryName ps) &
+      texy (psNumFuncs ps) &
+      texy (psPercentAnnot ps) <>
+      lnbk %: psLibraryName ps
+    pointerSummaries = map toPointerSummary ifaces
+    totals = textbf (texy ("Total" :: Text))
+               & summField psNumFuncs pointerSummaries
+               & texy (hmean (map psPercentAnnot pointerSummaries))
+               <> lnbk %: ""
+
+
+renderOutStatsTable :: [LibraryInterface] -> LaTeX
+renderOutStatsTable ifaces =
+  mconcat (map pointerSummaryToRow pointerSummaries)
+    <> (raw "\\midrule" %: "")
+    <> totals
+  where
+    pointerSummaryToRow :: PointerSummary -> LaTeX
+    pointerSummaryToRow ps =
+      texy (psLibraryName ps) &
+      texy (psNumFuncs ps) &
+      texy (psOutFuncs ps) &
+      texy (psOutParams ps) &
+      texy (psInOutFuncs ps) &
+      texy (psInOutParams ps) <>
+      lnbk %: psLibraryName ps
     pointerSummaries = map toPointerSummary ifaces
     totals = textbf (texy ("Total" :: Text))
                & summField psNumFuncs pointerSummaries
@@ -54,10 +106,48 @@ renderPointerStatsTable ifaces =
                & summField psOutParams pointerSummaries
                & summField psInOutFuncs pointerSummaries
                & summField psInOutParams pointerSummaries
+               <> lnbk %: ""
+
+renderArrayStatsTable :: [LibraryInterface] -> LaTeX
+renderArrayStatsTable ifaces =
+  mconcat (map pointerSummaryToRow pointerSummaries)
+    <> (raw "\\midrule" %: "")
+    <> totals
+  where
+    pointerSummaryToRow :: PointerSummary -> LaTeX
+    pointerSummaryToRow ps =
+      texy (psLibraryName ps) &
+      texy (psNumFuncs ps) &
+      texy (psArrayFuncs ps) &
+      texy (psArrayParams ps)  <>
+      lnbk %: psLibraryName ps
+    pointerSummaries = map toPointerSummary ifaces
+    totals = textbf (texy ("Total" :: Text))
+               & summField psNumFuncs pointerSummaries
                & summField psArrayFuncs pointerSummaries
                & summField psArrayParams pointerSummaries
-               & texy (hmean (map psPercentAnnot pointerSummaries))
                <> lnbk %: ""
+
+renderNullStatsTable :: [LibraryInterface] -> LaTeX
+renderNullStatsTable ifaces =
+  mconcat (map pointerSummaryToRow pointerSummaries)
+    <> (raw "\\midrule" %: "")
+    <> totals
+  where
+    pointerSummaryToRow :: PointerSummary -> LaTeX
+    pointerSummaryToRow ps =
+      texy (psLibraryName ps) &
+      texy (psNumFuncs ps) &
+      texy (psNullFuncs ps) &
+      texy (psNullParams ps) <>
+      lnbk %: psLibraryName ps
+    pointerSummaries = map toPointerSummary ifaces
+    totals = textbf (texy ("Total" :: Text))
+               & summField psNumFuncs pointerSummaries
+               & summField psNullFuncs pointerSummaries
+               & summField psNullParams pointerSummaries
+               <> lnbk %: ""
+
 
 renderMemoryStatsTable :: [LibraryInterface] -> LaTeX
 renderMemoryStatsTable ifaces =
@@ -92,19 +182,6 @@ hmean ns = round $ realN / sum recips
 summField :: (a -> Int) -> [a] -> LaTeX
 summField f = texy . foldr (+) 0 . map f
 
-pointerSummaryToRow :: PointerSummary -> LaTeX
-pointerSummaryToRow ps =
-  texy (psLibraryName ps) &
-    texy (psNumFuncs ps) &
-    texy (psOutFuncs ps) &
-    texy (psOutParams ps) &
-    texy (psInOutFuncs ps) &
-    texy (psInOutParams ps) &
-    texy (psArrayFuncs ps) &
-    texy (psArrayParams ps) &
-    texy (psPercentAnnot ps) <>
-    lnbk %: psLibraryName ps
-
 data MemorySummary =
   MemorySummary { msLibraryName :: Text
                 , msNumFuncs :: Int
@@ -138,6 +215,8 @@ data PointerSummary =
                  , psInOutParams :: Int
                  , psArrayFuncs :: Int
                  , psArrayParams :: Int
+                 , psNullFuncs :: Int
+                 , psNullParams :: Int
                  , psPercentAnnot :: Int
                  }
   deriving (Eq, Ord, Show)
@@ -152,7 +231,8 @@ toPointerSummary i =
                  , psInOutParams = countIf (paramHasAnnot (==PAInOut)) ps
                  , psArrayFuncs = countIf (funcHasAnnot isArray) fs
                  , psArrayParams = countIf (paramHasAnnot isArray) ps
-                                   -- FIXME: This could be updated with not-null
+                 , psNullFuncs = countIf (funcHasAnnot (==PANotNull)) fs
+                 , psNullParams = countIf (paramHasAnnot (==PANotNull)) ps
                  , psPercentAnnot = round $ 100.0 * totalAnnotFuncs / fromIntegral nFuncs
                  }
   where
@@ -166,6 +246,7 @@ isPointerAnnot :: ParamAnnotation -> Bool
 isPointerAnnot (PAArray _) = True
 isPointerAnnot PAOut = True
 isPointerAnnot PAInOut = True
+isPointerAnnot PANotNull = True
 isPointerAnnot _ = False
 
 isArray :: ParamAnnotation -> Bool
