@@ -1,6 +1,6 @@
 module Main ( main ) where
 
-import AI.SVM.Simple
+-- import AI.SVM.Simple
 import Control.Applicative
 import Control.Exception ( tryJust )
 import Control.Lens ( (.~), view )
@@ -60,7 +60,6 @@ data Opts = Opts { inputDependencies :: [String]
                  , librarySource :: Maybe FilePath
                  , reportDir :: Maybe FilePath
                  , annotationFile :: Maybe FilePath
-                 , errorModelFile :: Maybe FilePath
                  , noErrorLearning :: Bool
                  , noGeneralizeErrorCodes :: Bool
                  , dumpErrorFeatures :: Maybe FilePath
@@ -102,11 +101,6 @@ cmdOpts defaultRepo = Opts
               <> short 'a'
               <> metavar "FILE"
               <> help "An optional file containing annotations for the library being analyzed."))
-          <*> optional (strOption
-              ( long "svm-error-model"
-              <> short 'e'
-              <> metavar "FILE"
-              <> help "A trained SVM model for classifying error-reporting functions.  If this is provided, the SVM classifier will be used." ))
           <*> switch
               ( long "disable-func-generalization"
               <> help "Disable error reporting function learning entirely.  This flag overrides a specified classifier." )
@@ -156,10 +150,7 @@ dump opts name m = do
       annots <- loadAnnotations af
       return $! addManualAnnotations baseDeps annots
 
-  classifier <- case (errorModelFile opts, noErrorLearning opts) of
-    (_, True) -> return NoClassifier
-    (Just emf, False) -> liftM (FeatureClassifier . classify) (load emf)
-    (Nothing, False) -> return DefaultClassifier
+  let classifier = DefaultClassifier
 
   -- Have to give a type signature here to fix all of the FuncLike
   -- constraints to our metadata blob.
@@ -215,7 +206,7 @@ dump opts name m = do
 dumpCSV :: [(Value, UV.Vector Double)] -> FilePath -> IO ()
 dumpCSV dat file = LBS.writeFile file (CSV.encode dat')
   where
-    dat' = V.fromList $ mapMaybe prettyName dat
+    dat' = mapMaybe prettyName dat
     dblToTxt = LText.encodeUtf8 . LText.toLazyText . LText.realFloat
     prettyName (v, row) = do
       ident <- valueName v
