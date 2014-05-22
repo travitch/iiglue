@@ -3,7 +3,7 @@ module Main ( main ) where
 -- import AI.SVM.Simple
 import Control.Applicative
 import Control.Exception ( tryJust )
-import Control.Lens ( (.~), view )
+import Control.Lens ( Lens', lens, (.~), view, set )
 import Control.Monad ( guard, liftM )
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Csv as CSV
@@ -137,6 +137,9 @@ realMain opts = do
   mm <- buildModule [] requiredOptimizations (parseLLVMFile parseOpts) (inputFile opts)
   dump opts name mm
 
+elns :: Lens' AnalysisSummary (Maybe ErrorSummary)
+elns = lens (Just . (view errorHandlingSummary)) (\s n -> maybe s (\n' -> set errorHandlingSummary n' s) n)
+
 dump :: Opts -> String -> Module -> IO ()
 dump opts name m = do
   let pta = identifyIndirectCallTargets m
@@ -167,7 +170,7 @@ dump opts name m = do
       phase1 = [ identifyReturns ds returnSummary
                , identifyOutput m ds outputSummary
                  -- Nullable will depend on the error analysis result
-               , identifyNullable ds nullableSummary returnSummary
+               , identifyNullable ds nullableSummary returnSummary elns
                , identifyScalarEffects scalarEffectSummary
                , identifyArrays ds arraySummary
                  -- Finalizers will depend on nullable so that error
