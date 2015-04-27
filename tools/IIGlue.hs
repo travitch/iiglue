@@ -81,7 +81,7 @@ cmdOpts defaultRepo = Opts
               <> metavar "DIRECTORY"
               <> value defaultRepo
               <> help "The directory containing dependency summaries.  The summary of the input library will be stored here. (Default: consult environment)")
-          <*> option
+          <*> option auto
               ( long "diagnostics"
               <> metavar "DIAGNOSTIC"
               <> value Warning
